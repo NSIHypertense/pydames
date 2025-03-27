@@ -1,0 +1,5 @@
+"""
+Regle du jeu:
+Le but du jeu est de capturer tous les pions adverses.
+
+"""
