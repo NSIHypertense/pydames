@@ -8,4 +8,5 @@ class Pion:
         self.damier.plateau[self.position[0]][self.position[1]] = self.couleur
         self.etat = True
 
-    def deplacer(self)
+    def deplacer(self):
+        pass

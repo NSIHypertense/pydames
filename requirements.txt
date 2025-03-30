@@ -1,2 +1,5 @@
 flatbuffers
+glfw
+imgui
 numpy
+PyOpenGL
