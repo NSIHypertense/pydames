@@ -1,45 +1,73 @@
 from abc import ABC, abstractmethod
+import math
+import threading
+import traceback
 
 import numpy as np
 from OpenGL import GL
 import imgui
 
+import mp.client
 import util
 
 DAMIER_LONGUEUR = 8
-DAMIER_LARGEUR  = 8
+DAMIER_LARGEUR = 8
+
 
 def verifier_shader(shader):
     success = GL.glGetShaderiv(shader, GL.GL_COMPILE_STATUS)
     if not success:
         info_log = GL.glGetShaderInfoLog(shader)
         print(f"erreur de compilation du shader: {info_log.decode()}")
-        
+
+
 def verifier_programme(program):
     success = GL.glGetProgramiv(program, GL.GL_LINK_STATUS)
     if not success:
         info_log = GL.glGetProgramInfoLog(program)
         print(f"erreur de liaison du programme: {info_log.decode()}")
 
+
 class Scene(ABC):
     @property
     @abstractmethod
-    def prochaine_scene(self) -> 'Scene | None':
+    def prochaine_scene(self) -> "Scene | None":
         pass
+
+    @prochaine_scene.setter
+    def prochaine_scene(self, x):
+        self.prochaine_scene = x
 
     @abstractmethod
     def rendre(self, t):
         pass
+
 
 class SceneTitre(Scene):
     prochaine_scene = None
 
     def __init__(self):
         self.popup_commencer = False
-        self.adresse = "127.0.0.1"
+        self.destination = "127.0.0.1"
         self.port = "2332"
+        self.connexion = False
+        self.connexion_erreur = 0
+        self.thread_connexion = None
 
         self.quitter = False
+
+    def __connecter(self, t):
+        def creer_socket():
+            try:
+                mp.client.sock = mp.client.connecter(self.destination, int(self.port))
+                mp.client.demarrer_client()
+            except Exception:
+                print(traceback.format_exc())
+                self.connexion = False
+                self.connexion_erreur = t + 2
+
+        self.thread_connexion = threading.Thread(target=creer_socket)
+        self.thread_connexion.start()
 
     def rendre(self, t):
         io = imgui.get_io()
@@ -49,9 +77,15 @@ class SceneTitre(Scene):
         longueur, largeur = int(longueur_fenetre / 1.5), largeur_fenetre // 2
 
         imgui.set_next_window_size(longueur, largeur)
-        imgui.set_next_window_position((longueur_fenetre - longueur) // 2, (largeur_fenetre - largeur) // 2)
-        
-        imgui.begin("Menu principal", False, imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_MOVE)
+        imgui.set_next_window_position(
+            (longueur_fenetre - longueur) // 2, (largeur_fenetre - largeur) // 2
+        )
+
+        imgui.begin(
+            "Menu principal",
+            False,
+            imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_MOVE,
+        )
 
         imgui.dummy(1, 50)
 
@@ -82,26 +116,65 @@ class SceneTitre(Scene):
             imgui.open_popup("Commencer")
 
         longueur_popup = longueur_fenetre // 2
-        largeur_popup  = largeur_fenetre // 4
+        largeur_popup = largeur_fenetre // 4
 
         imgui.set_next_window_size(longueur_popup, largeur_popup)
-        imgui.set_next_window_position((longueur_fenetre - longueur_popup) / 2, (largeur_fenetre - largeur_popup) / 2)
+        imgui.set_next_window_position(
+            (longueur_fenetre - longueur_popup) / 2,
+            (largeur_fenetre - largeur_popup) / 2,
+        )
 
-        with imgui.begin_popup_modal("Commencer", flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_RESIZE) as popup:
+        with imgui.begin_popup_modal(
+            "Commencer", flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_RESIZE
+        ) as popup:
             if popup.opened:
                 imgui.text("Connectez-vous à un serveur :")
-                _, self.adresse = imgui.input_text("Adresse IP", self.adresse)
-                _, self.port = imgui.input_text("Port", self.port, flags=imgui.INPUT_TEXT_CHARS_DECIMAL)
+
+                if self.connexion:
+                    imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+                    imgui.push_style_var(
+                        imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5
+                    )
+
+                _, self.destination = imgui.input_text(
+                    "Destination", self.destination, -1
+                )
+                _, self.port = imgui.input_text(
+                    "Port", self.port, -1, imgui.INPUT_TEXT_CHARS_DECIMAL
+                )
 
                 if imgui.button("Connecter"):
-                    self.prochaine_scene = SceneDamier()
-                    # ...
-                    # self.popup_commencer = False
-                    # imgui.close_current_popup()
+                    print(f"Connexion en cours: {(self.destination, self.port)}")
+                    self.connexion = True
+                    self.__connecter(t)
+                elif self.connexion:
+                    imgui.pop_style_var()
+                    imgui.internal.pop_item_flag()
+
+                    c = abs(math.sin(t * 6))
+                    imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * c)
+                    imgui.text("Connexion en cours...")
+                    imgui.pop_style_var()
+
+                    self.connexion = not bool(mp.client.sock) or not mp.client.succes
+                    if not self.connexion:
+                        self.prochaine_scene = SceneDamier()
+                        self.popup_commencer = False
+                        imgui.close_current_popup()
+                elif t < self.connexion_erreur:
+                    imgui.push_style_var(
+                        imgui.STYLE_ALPHA,
+                        imgui.get_style().alpha * (self.connexion_erreur - t) / 2,
+                    )
+                    imgui.push_style_color(imgui.COLOR_TEXT, 1, 0, 0)
+                    imgui.text("Erreur de connexion!")
+                    imgui.pop_style_color(1)
+                    imgui.pop_style_var()
+
 
 class SceneDamier(Scene):
     class _GLDamier:
-        def __init__(self, damier_overlay: bool=False):
+        def __init__(self, damier_overlay: bool = False):
             self.damier_overlay = damier_overlay
 
             # test overlay
@@ -115,21 +188,31 @@ class SceneDamier(Scene):
 
             self.buffer_sommets = GL.glGenBuffers(1)
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.buffer_sommets)
-            GL.glBufferData(GL.GL_ARRAY_BUFFER, sommets.nbytes, sommets,
-                            GL.GL_DYNAMIC_DRAW if damier_overlay else GL.GL_STATIC_DRAW)
+            GL.glBufferData(
+                GL.GL_ARRAY_BUFFER,
+                sommets.nbytes,
+                sommets,
+                GL.GL_DYNAMIC_DRAW if damier_overlay else GL.GL_STATIC_DRAW,
+            )
             GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, GL.GL_FALSE, 0, None)
             GL.glEnableVertexAttribArray(0)
 
             self.buffer_couleurs = GL.glGenBuffers(1)
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.buffer_couleurs)
-            GL.glBufferData(GL.GL_ARRAY_BUFFER, couleurs.nbytes, couleurs,
-                            GL.GL_DYNAMIC_DRAW if damier_overlay else GL.GL_STATIC_DRAW)
+            GL.glBufferData(
+                GL.GL_ARRAY_BUFFER,
+                couleurs.nbytes,
+                couleurs,
+                GL.GL_DYNAMIC_DRAW if damier_overlay else GL.GL_STATIC_DRAW,
+            )
             GL.glVertexAttribPointer(1, 4, GL.GL_FLOAT, GL.GL_FALSE, 0, None)
             GL.glEnableVertexAttribArray(1)
 
             GL.glBindVertexArray(0)
 
-        def generer_buffers(self, cases_possibles: list[tuple[int, int]]) -> tuple[list[float], list[float]]:
+        def generer_buffers(
+            self, cases_possibles: list[tuple[int, int]]
+        ) -> tuple[list[float], list[float]]:
             sommets = []
             couleurs = []
             mx = 2 / DAMIER_LONGUEUR
@@ -194,7 +277,7 @@ class SceneDamier(Scene):
         self.damier = SceneDamier._GLDamier()
         self.overlay = SceneDamier._GLDamier(True)
 
-        self.overlay.set_cases([(1, 1), (3, 4)]) # test de cases
+        self.overlay.set_cases([(1, 1), (3, 4)])  # test de cases
 
     def __creer_programme_shader(self):
         vertex_shader = GL.glCreateShader(GL.GL_VERTEX_SHADER)
@@ -204,7 +287,7 @@ class SceneDamier(Scene):
 
         GL.glCompileShader(vertex_shader)
         verifier_shader(vertex_shader)
-        
+
         fragment_shader = GL.glCreateShader(GL.GL_FRAGMENT_SHADER)
 
         with util.resource("shader/damier_frag.glsl") as f:
@@ -212,13 +295,13 @@ class SceneDamier(Scene):
 
         GL.glCompileShader(fragment_shader)
         verifier_shader(vertex_shader)
-        
+
         programme = GL.glCreateProgram()
         GL.glAttachShader(programme, vertex_shader)
         GL.glAttachShader(programme, fragment_shader)
         GL.glLinkProgram(programme)
         verifier_programme(programme)
-        
+
         GL.glDeleteShader(vertex_shader)
         GL.glDeleteShader(fragment_shader)
 
@@ -246,4 +329,3 @@ class SceneDamier(Scene):
             assert 0 <= c[1] < DAMIER_LARGEUR
 
         self.__cases_possibles = sorted(cases)
-
