@@ -28,15 +28,65 @@ def verifier_programme(program):
         print(f"erreur de liaison du programme: {info_log.decode()}")
 
 
+def creer_programme_shader(vert: str, frag: str):
+    vertex_shader = GL.glCreateShader(GL.GL_VERTEX_SHADER)
+
+    with util.resource(vert) as f:
+        GL.glShaderSource(vertex_shader, f.read())
+
+    GL.glCompileShader(vertex_shader)
+    verifier_shader(vertex_shader)
+
+    fragment_shader = GL.glCreateShader(GL.GL_FRAGMENT_SHADER)
+
+    with util.resource(frag) as f:
+        GL.glShaderSource(fragment_shader, f.read())
+
+    GL.glCompileShader(fragment_shader)
+    verifier_shader(fragment_shader)
+
+    programme = GL.glCreateProgram()
+    GL.glAttachShader(programme, vertex_shader)
+    GL.glAttachShader(programme, fragment_shader)
+    GL.glLinkProgram(programme)
+    verifier_programme(programme)
+
+    GL.glDeleteShader(vertex_shader)
+    GL.glDeleteShader(fragment_shader)
+
+    return programme
+
+
 class Scene(ABC):
+    @property
+    @abstractmethod
+    def longueur(self) -> int:
+        pass
+
+    @longueur.setter
+    @abstractmethod
+    def longueur(self, x: int):
+        pass
+
+    @property
+    @abstractmethod
+    def largeur(self) -> int:
+        pass
+
+    @largeur.setter
+    @abstractmethod
+    def largeur(self, x: int):
+        pass
+
     @property
     @abstractmethod
     def prochaine_scene(self) -> "Scene | None":
         pass
 
     @prochaine_scene.setter
-    def prochaine_scene(self, x):
-        self.prochaine_scene = x
+    @abstractmethod
+    def prochaine_scene(self, x: "Scene"):
+        pass
 
     @abstractmethod
     def rendre(self, t):
@@ -45,6 +95,8 @@ class Scene(ABC):
 
 class SceneTitre(Scene):
     prochaine_scene = None
+    longueur = None
+    largeur = None
 
     def __init__(self):
         self.popup_commencer = False
@@ -61,7 +113,7 @@ class SceneTitre(Scene):
             try:
                 mp.client.sock = mp.client.connecter(self.destination, int(self.port))
                 mp.client.demarrer_client()
-            except Exception:
+            except OSError:
                 print(traceback.format_exc())
                 self.connexion = False
                 self.connexion_erreur = t + 2
@@ -156,8 +208,11 @@ class SceneTitre(Scene):
                     imgui.text("Connexion en cours...")
                     imgui.pop_style_var()
 
-                    self.connexion = not bool(mp.client.sock) or not mp.client.succes
-                    if not self.connexion:
+                    if mp.client.connexion_erreur:
+                        self.connexion = False
+                        self.connexion_erreur = t + 2
+                    elif mp.client.connexion_succes:
+                        self.connexion = False
                         self.prochaine_scene = SceneDamier()
                         self.popup_commencer = False
                         imgui.close_current_popup()
@@ -178,7 +233,7 @@ class SceneDamier(Scene):
             self.damier_overlay = damier_overlay
 
             # test overlay
-            sommets, couleurs = self.generer_buffers([(1, 1), (3, 1), (2, 2)])
+            sommets, couleurs = self.generer_buffers([(0, 1), (2, 1)])
 
             sommets = np.array(sommets, dtype=np.float32)
             couleurs = np.array(couleurs, dtype=np.float32)
@@ -267,45 +322,86 @@ class SceneDamier(Scene):
             GL.glDeleteBuffers(2, [self.buffer_sommets, self.buffer_couleurs])
             GL.glDeleteVertexArrays(1, [self.vao])
 
+    class _GLPion:
+        buffer_sommets = None
+
+        @classmethod
+        def creer_buffer_sommets(cls):
+            sommets = np.array(
+                [-1, 1, 1, 1, 1, -1, 1, -1, -1, -1, -1, 1],
+                dtype=np.float32,
+            )  # carré
+            cls.buffer_sommets = GL.glGenBuffers(1)
+
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, cls.buffer_sommets)
+            GL.glBufferData(
+                GL.GL_ARRAY_BUFFER, sommets.nbytes, sommets, GL.GL_STATIC_DRAW
+            )
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
+
+        def __init__(self, position: tuple[int, int]):
+            self.position = position
+
+            self.programme = creer_programme_shader(
+                "shader/pion_vert.glsl", "shader/pion_frag.glsl"
+            )
+            self.uniform_damier_taille = GL.glGetUniformLocation(
+                self.programme, "damier_taille"
+            )
+            self.uniform_pion_position = GL.glGetUniformLocation(
+                self.programme, "pion_position"
+            )
+            self.uniform_fenetre_taille = GL.glGetUniformLocation(
+                self.programme, "fenetre_taille"
+            )
+            self.uniform_t = GL.glGetUniformLocation(self.programme, "t")
+
+            GL.glUseProgram(self.programme)
+            GL.glUniform2f(self.uniform_damier_taille, DAMIER_LONGUEUR, DAMIER_LARGEUR)
+            GL.glUseProgram(0)
+
+            if not SceneDamier._GLPion.buffer_sommets:
+                SceneDamier._GLPion.creer_buffer_sommets()
+
+            self.vao = GL.glGenVertexArrays(1)
+            GL.glBindVertexArray(self.vao)
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, SceneDamier._GLPion.buffer_sommets)
+            GL.glVertexAttribPointer(0, 2, GL.GL_FLOAT, GL.GL_FALSE, 0, None)
+            GL.glEnableVertexAttribArray(0)
+            GL.glBindVertexArray(0)
+
+        def rendre(self, t, longueur, largeur):
+            GL.glUseProgram(self.programme)
+
+            GL.glUniform1f(self.uniform_t, t)
+            GL.glUniform2f(self.uniform_pion_position, *self.position)
+            GL.glUniform2f(self.uniform_fenetre_taille, longueur, largeur)
+
+            GL.glEnable(GL.GL_BLEND)
+            GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+
+            GL.glBindVertexArray(self.vao)
+            GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
+            GL.glBindVertexArray(0)
+
+            GL.glDisable(GL.GL_BLEND)
+
+            GL.glUseProgram(0)
+
     prochaine_scene = None
+    longueur = None
+    largeur = None
 
     def __init__(self):
         self.__cases_possibles = []
 
-        self.programme = self.__creer_programme_shader()
+        self.programme = creer_programme_shader(
+            "shader/damier_vert.glsl", "shader/damier_frag.glsl"
+        )
         self.uniform_t = GL.glGetUniformLocation(self.programme, "t")
         self.damier = SceneDamier._GLDamier()
         self.overlay = SceneDamier._GLDamier(True)
-
-        self.overlay.set_cases([(1, 1), (3, 4)])  # test de cases
-
-    def __creer_programme_shader(self):
-        vertex_shader = GL.glCreateShader(GL.GL_VERTEX_SHADER)
-
-        with util.resource("shader/damier_vert.glsl") as f:
-            GL.glShaderSource(vertex_shader, f.read())
-
-        GL.glCompileShader(vertex_shader)
-        verifier_shader(vertex_shader)
-
-        fragment_shader = GL.glCreateShader(GL.GL_FRAGMENT_SHADER)
-
-        with util.resource("shader/damier_frag.glsl") as f:
-            GL.glShaderSource(fragment_shader, f.read())
-
-        GL.glCompileShader(fragment_shader)
-        verifier_shader(vertex_shader)
-
-        programme = GL.glCreateProgram()
-        GL.glAttachShader(programme, vertex_shader)
-        GL.glAttachShader(programme, fragment_shader)
-        GL.glLinkProgram(programme)
-        verifier_programme(programme)
-
-        GL.glDeleteShader(vertex_shader)
-        GL.glDeleteShader(fragment_shader)
-
-        return programme
+        self.pion_test = SceneDamier._GLPion((1, 0))
 
     def rendre(self, t):
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
@@ -314,6 +410,7 @@ class SceneDamier(Scene):
 
         self.damier.rendre()
         self.overlay.rendre()
+        self.pion_test.rendre(t, self.longueur, self.largeur)
 
         GL.glUseProgram(0)
 

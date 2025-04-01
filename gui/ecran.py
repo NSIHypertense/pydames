@@ -3,7 +3,7 @@ from OpenGL import GL
 import imgui
 from imgui.integrations.glfw import GlfwRenderer
 
-from . scene import SceneTitre
+from .scene import SceneTitre
 
 # def blend_argb(a, b):
 #     return (
@@ -13,12 +13,15 @@ from . scene import SceneTitre
 #         int((a[3] + (b[3] * (255 - a[3]) / 255)))
 #     )
 
+
 def init():
     if not glfw.init():
         raise Exception("Impossible d'initialiser GLFW")
 
+
 def fini():
     glfw.terminate()
+
 
 class Ecran:
     def __init__(self, longueur: int, largeur: int):
@@ -37,7 +40,7 @@ class Ecran:
         self.imgui_renderer = GlfwRenderer(self.fenetre)
 
         self.scene = SceneTitre()
-    
+
     def poll(self) -> bool:
         glfw.poll_events()
         self.imgui_renderer.process_inputs()
@@ -53,10 +56,13 @@ class Ecran:
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
         imgui.new_frame()
+        self.scene.longueur, self.scene.largeur = glfw.get_window_size(self.fenetre)
         self.scene.rendre(glfw.get_time())
 
         imgui.set_next_window_position(0, 0)
-        imgui.begin("Debug", flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_ALWAYS_AUTO_RESIZE)
+        imgui.begin(
+            "Debug", flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_ALWAYS_AUTO_RESIZE
+        )
         imgui.text(f"fps: {self.fps:.1f}")
         imgui.end()
         imgui.render()
@@ -78,4 +84,3 @@ class Ecran:
 
     def __del__(self):
         self.imgui_renderer.shutdown()
-

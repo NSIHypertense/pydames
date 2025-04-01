@@ -8,7 +8,8 @@ from ormsgpack import MsgpackDecodeError
 from . import Paquet
 
 sock = None
-succes = False
+connexion_succes = False
+connexion_erreur = False
 thread = None
 
 
@@ -37,13 +38,15 @@ def envoyer(paquet: Paquet):
 
 
 def thread_client():
-    global succes
+    global connexion_succes
 
     def arreter():
         global sock
-        global succes
+        global connexion_erreur
+        global connexion_succes
 
-        succes = False
+        connexion_erreur = True
+        connexion_succes = False
         sock.close()
         sock = None
 
@@ -85,7 +88,7 @@ def thread_client():
         match paquet.type():
             case PaquetClientType.HANDSHAKE.value:
                 print("Connexion établie")
-                succes = True
+                connexion_succes = True
             case _:
                 erreur("paquet de type inconnu")
                 arreter()
@@ -93,12 +96,15 @@ def thread_client():
 
 
 def demarrer_client():
-    global succes
+    global connexion_erreur
+    global connexion_succes
     global thread
 
     if not sock:
         raise RuntimeError("aucun socket connecté")
-    succes = False
+
+    connexion_erreur = False
+    connexion_succes = False
 
     thread = threading.Thread(target=thread_client)
     thread.start()
