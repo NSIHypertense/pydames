@@ -57,6 +57,11 @@ class Ecran:
 
         imgui.new_frame()
         self.scene.longueur, self.scene.largeur = glfw.get_window_size(self.fenetre)
+        x, y = glfw.get_cursor_pos(self.fenetre)
+        self.scene.curseur = (int(x), int(y))
+        self.scene.clic = (
+            glfw.get_mouse_button(self.fenetre, glfw.MOUSE_BUTTON_LEFT) == glfw.PRESS
+        )
         self.scene.rendre(glfw.get_time())
 
         imgui.set_next_window_position(0, 0)
