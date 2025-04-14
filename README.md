@@ -1,6 +1,6 @@
 # pydames
 
-Jeu de dâmes en Python
+Jeu de dâmes en Python 3.11
 
 ## Installation
 

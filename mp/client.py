@@ -1,3 +1,4 @@
+import random
 import socket
 import sys
 import threading
@@ -8,11 +9,19 @@ from logic.damier import CouleurPion, Damier
 
 from . import Paquet, PaquetClientType, PaquetServeurType
 
-sock = None
+# Joueur
+pseudo = f"Joueur{random.randint(0, 999):03}"
+
+# Connexion
 connexion_succes = False
 connexion_erreur = False
+serveur = None
+sock = None
 thread = None
 
+# Partie
+attente = True
+pret = False
 couleur = None
 damier = None
 tour = False
@@ -20,17 +29,12 @@ deplacements = []
 sauts = []
 
 
-def connecter(destination: str, port: int) -> socket.socket:
-    print("création du socket")
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    print("connexion tcp au serveur...")
-    s.connect((destination, port))
-    print("connecté tcp")
-    return s
+def paquet_handshake(pseudo: str) -> Paquet:
+    return Paquet([PaquetClientType.HANDSHAKE, pseudo])
 
 
-def paquet_handshake() -> Paquet:
-    return Paquet([PaquetClientType.HANDSHAKE])
+def paquet_pret() -> Paquet:
+    return Paquet([PaquetClientType.PRET])
 
 
 def paquet_deplacer(source: tuple[int, int], cible: tuple[int, int]) -> Paquet:
@@ -39,6 +43,7 @@ def paquet_deplacer(source: tuple[int, int], cible: tuple[int, int]) -> Paquet:
 
 def erreur(*args, **kwargs):
     print("erreur multijoueur :", *args, file=sys.stderr, **kwargs)
+    arreter()
 
 
 def envoyer(paquet: Paquet):
@@ -50,29 +55,24 @@ def envoyer(paquet: Paquet):
 def thread_client():
     global connexion_succes
 
+    global attente
+    global pret
     global couleur
     global damier
     global tour
     global deplacements
     global sauts
 
-    def arreter():
-        global sock
-        global connexion_erreur
-        global connexion_succes
-
-        connexion_erreur = True
-        connexion_succes = False
-        sock.close()
-        sock = None
-
     while sock:
         parties = []
         octets = sock.recv(4)
 
+        if not octets:
+            erreur("la connexion a été fermée")
+            return
+
         if len(octets) < 4:
             erreur("paquet mal formé, header taille invalide")
-            arreter()
             return
 
         taille_paquet = int.from_bytes(octets[:4], byteorder="little", signed=False)
@@ -90,38 +90,32 @@ def thread_client():
             paquet = Paquet.deserialiser(octets)
         except MsgpackDecodeError:
             erreur("paquet mal formé, erreur msgpack")
-            arreter()
             return
         except ValueError as e:
             erreur(e)
-            arreter()
             return
 
-        print(f"recu paquet: {paquet.x}")
+        # print(f"reçu paquet: {paquet.x}")
 
         try:
             match paquet.type():
                 case PaquetServeurType.HANDSHAKE.value:
-                    envoyer(paquet_handshake())
-                    print("Connexion établie")
+                    envoyer(paquet_handshake(pseudo))
+                    print("Connexion au serveur pydames établie")
                     connexion_succes = True
                 case PaquetServeurType.ERREUR.value:
                     erreur(paquet.x[1])
-                    arreter()
                     return
-                case PaquetServeurType.DAMIER.value:
-                    couleur = CouleurPion(paquet.x[1])
-                    damier = Damier.from_matrice(paquet.x[2])
-                case PaquetServeurType.DEPLACEMENTS.value:
-                    tour = False
-                    for i in range(0, len(paquet.x[1]), 2):
-                        source, cible = tuple(paquet.x[1][i]), tuple(paquet.x[1][i + 1])
-                        deplacements.extend([source, cible])
-                        sauts.append(damier.deplacer_pion(source, cible))
-                case PaquetServeurType.TOUR.value:
-                    tour = True
+                case PaquetServeurType.ATTENTE.value:
+                    print("L'adversaire s'est déconnecté du serveur.")
+                    pret = False
+                    attente = True
+                case PaquetServeurType.LANCEMENT.value:
+                    attente = False
+                    damier = Damier.from_matrice(paquet.x[1])
                 case PaquetServeurType.CONCLUSION.value:
                     print("La partie est finie.")
+                    attente = True
                     gagnant = paquet.x[1]
 
                     if gagnant:
@@ -135,25 +129,70 @@ def thread_client():
 
                     arreter()
                     return
+                case PaquetServeurType.COULEUR.value:
+                    couleur = CouleurPion(paquet.x[1])
+                case PaquetServeurType.DEPLACEMENTS.value:
+                    tour = False
+                    for i in range(0, len(paquet.x[1]), 2):
+                        source, cible = tuple(paquet.x[1][i]), tuple(paquet.x[1][i + 1])
+                        deplacements.extend([source, cible])
+                        saut = damier.deplacer_pion(source, cible)
+                        if saut:
+                            sauts.append(saut)
+                case PaquetServeurType.TOUR.value:
+                    tour = True
                 case _:
                     erreur("paquet de type inconnu")
-                    arreter()
                     return
         except (IndexError, KeyError):
             erreur("paquet mal formé")
             return
 
 
-def demarrer_client():
+def demarrer(destination: str, port: int):
     global connexion_erreur
     global connexion_succes
+    global serveur
+    global sock
     global thread
 
-    if not sock:
-        raise RuntimeError("aucun socket connecté")
+    serveur = (destination, port)
+
+    print("création du socket")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    print("connexion TCP au serveur...")
+    sock.connect((destination, port))
+    print("connexion TCP établie")
 
     connexion_erreur = False
     connexion_succes = False
 
     thread = threading.Thread(target=thread_client)
     thread.start()
+
+
+def arreter():
+    global attente
+    global pret
+
+    global connexion_erreur
+    global connexion_succes
+    global sock
+    global thread
+
+    pret = False
+    attente = True
+
+    connexion_erreur = True
+    connexion_succes = False
+
+    if sock:
+        print("arrêt du client...")
+        sock.shutdown(socket.SHUT_RDWR)
+        sock.close()
+        sock = None
+
+    if thread:
+        if thread is not threading.current_thread():
+            thread.join()
+        thread = None

@@ -7,16 +7,19 @@ import ormsgpack
 
 class PaquetClientType(Enum):
     HANDSHAKE = 1
-    DEPLACER = 2
+    PRET = 2
+    DEPLACER = 3
 
 
 class PaquetServeurType(Enum):
     HANDSHAKE = 1
     ERREUR = 2
-    DAMIER = 3
-    DEPLACEMENTS = 4
-    TOUR = 5
-    CONCLUSION = 6
+    ATTENTE = 3
+    LANCEMENT = 4
+    CONCLUSION = 5
+    COULEUR = 6
+    DEPLACEMENTS = 7
+    TOUR = 8
 
 
 class Serialisable(ABC):

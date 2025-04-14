@@ -1,7 +1,9 @@
 import argparse
 
 import gui
+import mp.client
 import mp.serveur
+import util
 
 
 def type_port(x):
@@ -11,27 +13,38 @@ def type_port(x):
     return x
 
 
-parseur = argparse.ArgumentParser(prog="pydames", description="Jeu de dâmes")
+if __name__ == "__main__":
+    parseur = argparse.ArgumentParser(prog="pydames", description="Jeu de dâmes")
 
-parseur.add_argument(
-    "-s", "--serveur", action="store_true", default=False, help="Héberger un serveur"
-)
-parseur.add_argument(
-    "-p", "--port", type=type_port, default=2332, help="Port du serveur"
-)
+    parseur.add_argument(
+        "-s",
+        "--serveur",
+        action="store_true",
+        default=False,
+        help="Héberger un serveur",
+    )
 
-args = parseur.parse_args()
+    args = parseur.parse_args()
 
-if args.serveur:
-    print("Lancement du serveur...")
-    mp.serveur.servir("0.0.0.0", args.port)
+    if args.serveur:
+        if not util.configuration:
+            print("Erreur: la configuration du serveur n'a pas été trouvée !")
+            quit()
 
-    quit()
+        print("Lancement du serveur...")
+        mp.serveur.demarrer(
+            util.configuration.socket["adresse"], util.configuration.socket["port"]
+        )
+        print()
+        mp.serveur.Console().cmdloop()
 
-gui.init()
-ecran = gui.Ecran(800, 800)
+        quit()
 
-while ecran.poll():
-    ecran.rendre()
+    gui.init()
+    ecran = gui.Ecran(800, 800)
 
-gui.fini()
+    while ecran.poll():
+        ecran.rendre()
+
+    mp.client.arreter()
+    gui.fini()

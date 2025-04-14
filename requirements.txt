@@ -1,5 +1,6 @@
 glfw
 imgui
+mysql-connector-python==8.4.0
 numpy
 ormsgpack
 PyOpenGL

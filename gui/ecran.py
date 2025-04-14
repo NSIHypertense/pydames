@@ -45,9 +45,9 @@ class Ecran:
         glfw.poll_events()
         self.imgui_renderer.process_inputs()
 
-        if glfw.window_should_close(self.fenetre):
-            self.marche = False
-        elif isinstance(self.scene, SceneTitre) and self.scene.quitter:
+        if glfw.window_should_close(self.fenetre) or (
+            isinstance(self.scene, SceneTitre) and self.scene.quitter
+        ):
             self.marche = False
 
         return self.marche

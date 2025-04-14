@@ -107,7 +107,7 @@ class Scene(ABC):
         pass
 
     @abstractmethod
-    def rendre(self, t):
+    def rendre(self, t: float):
         pass
 
 
@@ -120,6 +120,8 @@ class SceneTitre(Scene):
 
     def __init__(self):
         self.popup_commencer = False
+        self.popup_reglages = False
+
         self.destination = "127.0.0.1"
         self.port = "2332"
         self.connexion = False
@@ -131,8 +133,8 @@ class SceneTitre(Scene):
     def __connecter(self, t):
         def creer_socket():
             try:
-                mp.client.sock = mp.client.connecter(self.destination, int(self.port))
-                mp.client.demarrer_client()
+                mp.client.arreter()
+                mp.client.demarrer(self.destination, int(self.port))
             except OSError:
                 print(traceback.format_exc())
                 self.connexion = False
@@ -176,7 +178,7 @@ class SceneTitre(Scene):
 
         imgui.set_cursor_pos_x((longueur - longueur_bouton) / 2)
         if imgui.button("Réglages", longueur_bouton, largeur_bouton):
-            print("Les réglages ne sont pas implémentés.")
+            self.popup_reglages = True
 
         imgui.set_cursor_pos_x((longueur - longueur_bouton) / 2)
         if imgui.button("Quitter", longueur_bouton, largeur_bouton):
@@ -186,15 +188,17 @@ class SceneTitre(Scene):
 
         if self.popup_commencer:
             imgui.open_popup("Commencer")
+        if self.popup_reglages:
+            imgui.open_popup("Réglages")
 
-        longueur_popup = longueur_fenetre // 2
-        largeur_popup = largeur_fenetre // 4
-
-        imgui.set_next_window_size(longueur_popup, largeur_popup)
-        imgui.set_next_window_position(
-            (longueur_fenetre - longueur_popup) / 2,
-            (largeur_fenetre - largeur_popup) / 2,
+        taille_popup = (longueur_fenetre // 2, largeur_fenetre // 4)
+        position_popup = (
+            (longueur_fenetre - taille_popup[0]) / 2,
+            (largeur_fenetre - taille_popup[1]) / 2,
         )
+
+        imgui.set_next_window_size(*taille_popup)
+        imgui.set_next_window_position(*position_popup)
 
         with imgui.begin_popup_modal(
             "Commencer", flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_RESIZE
@@ -233,7 +237,7 @@ class SceneTitre(Scene):
                         self.connexion_erreur = t + 2
                     elif mp.client.connexion_succes:
                         self.connexion = False
-                        self.prochaine_scene = SceneDamier()
+                        self.prochaine_scene = SceneAttente()
                         self.popup_commencer = False
                         imgui.close_current_popup()
                 elif t < self.connexion_erreur:
@@ -245,6 +249,122 @@ class SceneTitre(Scene):
                     imgui.text("Erreur de connexion!")
                     imgui.pop_style_color(1)
                     imgui.pop_style_var()
+
+                imgui.same_line()
+                if imgui.button("Retour"):
+                    self.popup_commencer = False
+                    imgui.close_current_popup()
+
+        imgui.set_next_window_size(*taille_popup)
+        imgui.set_next_window_position(*position_popup)
+
+        with imgui.begin_popup_modal(
+            "Réglages", flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_RESIZE
+        ) as popup:
+            if popup.opened:
+                _, pseudo = imgui.input_text("Pseudonyme", mp.client.pseudo)
+                if 3 <= len(pseudo) <= 24:
+                    mp.client.pseudo = pseudo
+                else:
+                    imgui.text("Le pseudonyme doit comporter entre 3 et 24 caractères.")
+
+                if imgui.button("Retour"):
+                    self.popup_reglages = False
+                    imgui.close_current_popup()
+
+
+class SceneAttente(Scene):
+    prochaine_scene = None
+    longueur = None
+    largeur = None
+    curseur = None
+    clic = False
+
+    def rendre(self, t):
+        if mp.client.connexion_erreur:
+            self.prochaine_scene = SceneTitre()
+            return
+        elif mp.client.connexion_succes and not mp.client.attente:
+            self.prochaine_scene = SceneDamier()
+            return
+
+        io = imgui.get_io()
+        longueur_fenetre = io.display_size.x
+        largeur_fenetre = io.display_size.y
+
+        longueur_popup = longueur_fenetre // 2
+        largeur_popup = largeur_fenetre // 4
+
+        imgui.set_next_window_size(longueur_popup, largeur_popup)
+        imgui.set_next_window_position(
+            (longueur_fenetre - longueur_popup) / 2,
+            (largeur_fenetre - largeur_popup) / 2,
+        )
+
+        imgui.begin(
+            "Attente",
+            False,
+            imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_MOVE,
+        )
+
+        imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 10)
+
+        if mp.client.serveur:
+            texte_connexion = f"Connecté en tant que '{mp.client.pseudo}' à {mp.client.serveur[0]}:{mp.client.serveur[1]}"
+            imgui.set_cursor_pos_x(
+                (longueur_popup - imgui.calc_text_size(texte_connexion)[0]) / 2
+            )
+            imgui.text(texte_connexion)
+
+        points = "." * (1 + int(t * 2) % 3)
+        etat_pret = mp.client.pret
+
+        if etat_pret:
+            texte_attente = f"Attente du joueur adversaire{points}"
+
+            imgui.set_cursor_pos_x(
+                (longueur_popup - imgui.calc_text_size(texte_attente)[0]) / 2
+            )
+            imgui.text(texte_attente)
+
+        texte_etat = (
+            "Vous êtes prêt." if etat_pret else f"Vous n'êtes pas encore prêt{points}"
+        )
+        imgui.set_cursor_pos_x(
+            (longueur_popup - imgui.calc_text_size(texte_etat)[0]) / 2
+        )
+        imgui.text(texte_etat)
+
+        imgui.dummy(1, 10)
+
+        largeur_bouton = (
+            max(
+                imgui.calc_text_size("Prêt")[0],
+                imgui.calc_text_size("Déconnecter")[0],
+            )
+            + 20
+        )
+
+        total_larg = largeur_bouton * 2 + 20
+        imgui.set_cursor_pos_x((longueur_popup - total_larg) / 2)
+
+        if etat_pret:
+            imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
+            imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
+        if imgui.button("Prêt", largeur_bouton, 30):
+            mp.client.pret = True
+            mp.client.envoyer(mp.client.paquet_pret())
+        if etat_pret:
+            imgui.pop_style_var()
+            imgui.internal.pop_item_flag()
+
+        imgui.same_line(spacing=20)
+
+        if imgui.button("Déconnecter", largeur_bouton, 30):
+            mp.client.arreter()
+            self.prochaine_scene = SceneTitre()
+
+        imgui.end()
 
 
 class SceneDamier(Scene):
@@ -292,11 +412,9 @@ class SceneDamier(Scene):
             mx = 2 / DAMIER_LONGUEUR
             my = 2 / DAMIER_LARGEUR
 
-            case = (-1, 0) if cases_possibles == [] else cases_possibles.pop(0)
-
             for y in range(DAMIER_LARGEUR):
                 for x in range(DAMIER_LONGUEUR):
-                    if not self.damier_overlay or (case[0] == x and case[1] == y):
+                    if not self.damier_overlay or (x, y) in cases_possibles:
                         x0 = x * mx - 1
                         y0 = (DAMIER_LARGEUR - 1 - y) * my - 1
                         x1 = x0 + mx
@@ -307,8 +425,6 @@ class SceneDamier(Scene):
 
                         if self.damier_overlay:
                             couleur = [1, 0, 1, 0]
-                            if cases_possibles != []:
-                                case = cases_possibles.pop(0)
                         else:
                             couleur = (
                                 [1 - 1 / 12, 1 - 1 / 12, 1 - 1 / 16, 1]
@@ -447,11 +563,14 @@ class SceneDamier(Scene):
         if not mp.client.sock:
             self.prochaine_scene = SceneTitre()
             return
+        elif mp.client.attente:
+            self.prochaine_scene = SceneAttente()
+            return
 
         self.appui = not self.clic and self.clic_avant and mp.client.tour
         self.clic_avant = self.clic
 
-        while mp.client.deplacements != []:
+        while mp.client.deplacements:
             self.__cases_possibles = []
             self.overlay.set_cases([])
 
@@ -463,7 +582,7 @@ class SceneDamier(Scene):
             else:
                 print("impossible d'effectuer le déplacement !")
 
-        while mp.client.sauts != []:
+        while mp.client.sauts:
             case = mp.client.sauts.pop(0)
             i = next((i for i, p in enumerate(self.pions) if p.position == case), None)
 
@@ -518,7 +637,6 @@ class SceneDamier(Scene):
                 self.__cases_possibles = sorted(
                     mp.client.damier.trouver_cases_possibles(*pion.position)
                 )
-                print(self.__cases_possibles)
                 self.overlay.set_cases(self.__cases_possibles.copy())
 
             pion.rendre(t, self.longueur, self.largeur, selection)
