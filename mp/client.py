@@ -183,7 +183,7 @@ def arreter():
     pret = False
     attente = True
 
-    connexion_erreur = True
+    connexion_erreur = False
     connexion_succes = False
 
     if sock:

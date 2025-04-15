@@ -6,6 +6,7 @@ import sys
 import threading
 
 from ormsgpack import MsgpackDecodeError
+import mysql.connector
 
 from . import Paquet, PaquetClientType, PaquetServeurType
 from logic.damier import DAMIER_LARGEUR, DAMIER_LONGUEUR, CouleurPion, Damier
@@ -48,7 +49,7 @@ class Statistiques:
 
 class Jeu:
     def __init__(self):
-        self.id = _base.ajouter_jeu()
+        self.id = _base.ajouter_jeu() if _base else None
         self.partie = Partie(self.id)
         self.__sock_noir, self.__sock_blanc, self.__joueurs = None, None, {}
 
@@ -91,7 +92,8 @@ class Jeu:
                 return None
 
     def creer_joueur(self, pseudo: str):
-        self.__joueurs[pseudo] = _base.ajouter_joueur(pseudo)
+        if _base:
+            self.__joueurs[pseudo] = _base.ajouter_joueur(pseudo)
 
     def obtenir_joueur(self, pseudo: str) -> int | None:
         return self.__joueurs.get(pseudo)
@@ -114,12 +116,13 @@ class Partie:
         return self.__fin
 
     def demarrer(self, noir: str, blanc: str):
-        self.__id_noir, self.__id_blanc = (
-            _base.ajouter_joueur(noir),
-            _base.ajouter_joueur(blanc),
-        )
-
         self.damier.installer()
+
+        if _base:
+            self.__id_noir, self.__id_blanc = (
+                _base.ajouter_joueur(noir),
+                _base.ajouter_joueur(blanc),
+            )
 
         self.stat_noir = Statistiques(
             0,
@@ -147,28 +150,29 @@ class Partie:
 
     def arreter(self):
         self.__fin = datetime.datetime.now()
+        
+        if _base:
+            id_stat_noir = _base.ajouter_statistiques(
+                self.stat_noir.score,
+                self.stat_noir.dames,
+                self.stat_noir.pions_restants,
+            )
+            id_stat_blanc = _base.ajouter_statistiques(
+                self.stat_blanc.score,
+                self.stat_blanc.dames,
+                self.stat_blanc.pions_restants,
+            )
 
-        id_stat_noir = _base.ajouter_statistiques(
-            self.stat_noir.score,
-            self.stat_noir.dames,
-            self.stat_noir.pions_restants,
-        )
-        id_stat_blanc = _base.ajouter_statistiques(
-            self.stat_blanc.score,
-            self.stat_blanc.dames,
-            self.stat_blanc.pions_restants,
-        )
+            id_equipe_noir = _base.ajouter_equipe(self.__id_noir, id_stat_noir)
+            id_equipe_blanc = _base.ajouter_equipe(self.__id_blanc, id_stat_blanc)
 
-        id_equipe_noir = _base.ajouter_equipe(self.__id_noir, id_stat_noir)
-        id_equipe_blanc = _base.ajouter_equipe(self.__id_blanc, id_stat_blanc)
-
-        _base.ajouter_partie(
-            self.__id_jeu,
-            id_equipe_noir,
-            id_equipe_blanc,
-            str(self.__debut),
-            str(self.__fin),
-        )
+            _base.ajouter_partie(
+                self.__id_jeu,
+                id_equipe_noir,
+                id_equipe_blanc,
+                str(self.__debut),
+                str(self.__fin),
+            )
 
 
 class DonneesClient:
@@ -268,12 +272,14 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                             break
 
                         _clients[self.request].pseudo = pseudo
+                        print(f"({self.client_address[0]}) connecté en tant que '{pseudo}'")
 
                         self.envoyer(_paquet_couleur(_couleur_client(n_client)))
                         if n_client == 0:
                             self.envoyer(_paquet_tour())
                     case PaquetClientType.PRET.value:
                         self.mettre_pret()
+                        print(f"({self.client_address[0]}) {pseudo} : prêt")
 
                         if len(_clients) == 2:
                             tous_prets = all(d.etat_pret for d in _clients.values())
@@ -286,6 +292,7 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                                     _clients[noir].pseudo, _clients[blanc].pseudo
                                 )
                                 _diffuser(_paquet_lancement())
+                                print("Partie lancée")
                     case PaquetClientType.DEPLACER.value:
                         if _jeu.partie.fin:
                             self.erreur("La partie est déjà finie !")
@@ -304,9 +311,11 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                                 if gagnant := _jeu.partie.damier.gagnant():
                                     _jeu.partie.arreter()
                                     _diffuser(_paquet_conclusion(gagnant))
+                                    print(f"Partie terminée : {gagnant}")
                                 elif _jeu.partie.damier.est_bloque():
                                     _jeu.partie.arreter()
                                     _diffuser(_paquet_conclusion(None))
+                                    print(f"Partie terminée : aucun gagnant")
                             else:
                                 self.erreur(
                                     f"déplacement illégal : {source} -> {cible}"
@@ -395,12 +404,16 @@ def demarrer(destination: str, port: int):
 
     global _jeu
 
-    _base = bdd.Base(
-        configuration.mysql["hote"],
-        configuration.mysql["utilisateur"],
-        configuration.mysql["mdp"],
-        configuration.mysql["base"],
-    )
+    try:
+        _base = bdd.Base(
+            configuration.mysql["hote"],
+            configuration.mysql["utilisateur"],
+            configuration.mysql["mdp"],
+            configuration.mysql["base"],
+        )
+    except mysql.connector.Error as e:
+        print(e)
+        print("Le serveur sera démarré sans base de données.")
 
     _jeu = Jeu()
 

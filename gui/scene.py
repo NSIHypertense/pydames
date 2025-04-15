@@ -623,8 +623,11 @@ class SceneDamier(Scene):
             self.curseur[0] * DAMIER_LONGUEUR // self.longueur,
             self.curseur[1] * DAMIER_LARGEUR // self.largeur,
         )
+        
         selection_est_pion = (
             mp.client.damier is not None
+            and 0 <= damier_curseur[0] < DAMIER_LONGUEUR
+            and 0 <= damier_curseur[1] < DAMIER_LARGEUR
             and mp.client.damier.obtenir_pion(*damier_curseur) is not None
         )
 

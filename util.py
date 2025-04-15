@@ -54,7 +54,7 @@ root_pydames = pathlib.Path(__file__).resolve().parent
 
 
 def resource(emplacement: str | pathlib.Path, octets: bool = False):
-    return open(root_pydames / emplacement, mode="rb" if octets else "r")
+    return open(root_pydames / emplacement, mode="rb" if octets else "r", encoding="utf-8")
 
 
 fichier_conf = root_pydames / "serveur.toml"
@@ -64,7 +64,7 @@ if fichier_conf.exists():
     with open(fichier_conf, "rb") as f:
         configuration = ConfigurationServeur(tomllib.load(f))
 else:
-    with open(fichier_conf, "w") as f:
+    with open(fichier_conf, "w", encoding="utf-8") as f:
         f.write(conf_defaut)
         print(
             f"Configuration par défaut écrite dans '{fichier_conf}'. Veuillez la mettre à jour."
