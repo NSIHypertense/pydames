@@ -372,6 +372,21 @@ class SceneDamier(Scene):
         def __init__(self, damier_overlay: bool = False):
             self.damier_overlay = damier_overlay
 
+            self.programme = creer_programme_shader(
+                "shader/damier_vert.glsl", "shader/damier_frag.glsl"
+            )
+            self.uniform_t = GL.glGetUniformLocation(self.programme, "t")
+            self.uniform_fenetre_taille = GL.glGetUniformLocation(
+                self.programme, "fenetre_taille"
+            )
+            self.uniform_damier_taille = GL.glGetUniformLocation(
+                self.programme, "damier_taille"
+            )
+
+            GL.glUseProgram(self.programme)
+            GL.glUniform2f(self.uniform_damier_taille, DAMIER_LONGUEUR, DAMIER_LARGEUR)
+            GL.glUseProgram(0)
+
             sommets, couleurs = self.generer_buffers([])
 
             sommets = np.array(sommets, dtype=np.float32)
@@ -453,7 +468,11 @@ class SceneDamier(Scene):
 
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
 
-        def rendre(self):
+        def rendre(self, t, longueur, largeur):
+            GL.glUseProgram(self.programme)
+            GL.glUniform1f(self.uniform_t, t)
+            GL.glUniform2f(self.uniform_fenetre_taille, longueur, largeur)
+
             GL.glEnable(GL.GL_BLEND)
             GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
             GL.glBindVertexArray(self.vao)
@@ -548,10 +567,6 @@ class SceneDamier(Scene):
     def __init__(self):
         self.__cases_possibles = []
 
-        self.programme = creer_programme_shader(
-            "shader/damier_vert.glsl", "shader/damier_frag.glsl"
-        )
-        self.uniform_t = GL.glGetUniformLocation(self.programme, "t")
         self.damier = SceneDamier._GLDamier()
         self.overlay = SceneDamier._GLDamier(True)
         self.pions = []
@@ -600,11 +615,9 @@ class SceneDamier(Scene):
                         self.pions.append(SceneDamier._GLPion(x, y, c))
 
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
-        GL.glUseProgram(self.programme)
-        GL.glUniform1f(self.uniform_t, t)
 
-        self.damier.rendre()
-        self.overlay.rendre()
+        self.damier.rendre(t, self.longueur, self.largeur)
+        self.overlay.rendre(t, self.longueur, self.largeur)
 
         damier_curseur = (
             self.curseur[0] * DAMIER_LONGUEUR // self.longueur,
