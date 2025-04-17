@@ -85,7 +85,8 @@ class Ecran:
             self.i = 0
 
         if self.scene.prochaine_scene:
+            self.scene.fini()
             self.scene = self.scene.prochaine_scene
 
-    def __del__(self):
+    def fini(self):
         self.imgui_renderer.shutdown()

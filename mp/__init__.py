@@ -9,6 +9,7 @@ class PaquetClientType(Enum):
     HANDSHAKE = 1
     PRET = 2
     DEPLACER = 3
+    ANNULER = 4
 
 
 class PaquetServeurType(Enum):
@@ -19,7 +20,8 @@ class PaquetServeurType(Enum):
     CONCLUSION = 5
     COULEUR = 6
     DEPLACEMENTS = 7
-    TOUR = 8
+    MODIFICATION = 8
+    TOUR = 9
 
 
 class Serialisable(ABC):
@@ -37,6 +39,9 @@ class Paquet(Serialisable):
         if not isinstance(x, list):
             raise ValueError("paquet mal formé")
         self.x = x
+
+    def __str__(self):
+        return str(self.x)
 
     def type(self) -> int:
         return self.x[0]

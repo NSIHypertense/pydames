@@ -4,12 +4,13 @@ import select
 import socketserver
 import sys
 import threading
+import traceback
 
 from ormsgpack import MsgpackDecodeError
 import mysql.connector
 
 from . import Paquet, PaquetClientType, PaquetServeurType
-from logic.damier import DAMIER_LARGEUR, DAMIER_LONGUEUR, CouleurPion, Damier
+from logic.damier import DAMIER_LARGEUR, DAMIER_LONGUEUR, Pion, Damier
 from util import configuration
 import bdd
 
@@ -38,9 +39,9 @@ class Statistiques:
     def pions_restants(self) -> int:
         return self.__pions_restants
 
-    def sauter(self):
-        self.__score += 1
-        self.__pions_restants -= 1
+    def sauter(self, sauts: int):
+        self.__score += sauts
+        self.__pions_restants -= sauts
 
     def dame(self):
         self.__score += 2
@@ -72,11 +73,11 @@ class Jeu:
         self.__sock_noir = tab_clients[0]
         self.__sock_blanc = tab_clients[1]
 
-    def couleur(self, sock) -> CouleurPion | None:
+    def couleur(self, sock) -> Pion | None:
         if sock == self.__sock_noir:
-            return CouleurPion.NOIR
+            return Pion.NOIR
         elif sock == self.__sock_blanc:
-            return CouleurPion.BLANC
+            return Pion.BLANC
         else:
             return None
 
@@ -84,9 +85,9 @@ class Jeu:
         assert self.partie
 
         match self.couleur(sock):
-            case CouleurPion.NOIR:
+            case Pion.NOIR:
                 return self.partie.stat_noir
-            case CouleurPion.BLANC:
+            case Pion.BLANC:
                 return self.partie.stat_blanc
             case _:
                 return None
@@ -131,7 +132,7 @@ class Partie:
                 1
                 for ligne in self.damier.matrice
                 for p in ligne
-                if p == CouleurPion.NOIR
+                if p == Pion.NOIR or p == Pion.DAME_NOIR
             ),
         )
         self.stat_blanc = Statistiques(
@@ -141,7 +142,7 @@ class Partie:
                 1
                 for ligne in self.damier.matrice
                 for p in ligne
-                if p == CouleurPion.BLANC
+                if p == Pion.BLANC or p == Pion.DAME_BLANC
             ),
         )
 
@@ -150,7 +151,7 @@ class Partie:
 
     def arreter(self):
         self.__fin = datetime.datetime.now()
-        
+
         if _base:
             id_stat_noir = _base.ajouter_statistiques(
                 self.stat_noir.score,
@@ -261,38 +262,48 @@ class Gestionnaire(socketserver.BaseRequestHandler):
             try:
                 match paquet.type():
                     case PaquetClientType.HANDSHAKE.value:
-                        pseudo = paquet.x[1]
+                        if _clients.get(self.request).pseudo:
+                            self.erreur("La connexion a déjà été établie !")
+                        else:
+                            pseudo = paquet.x[1]
 
-                        if not isinstance(pseudo, str) or not (3 <= len(pseudo) <= 24):
-                            self.erreur("pseudonyme invalide")
-                            break
+                            if not isinstance(pseudo, str) or not (
+                                3 <= len(pseudo) <= 24
+                            ):
+                                self.erreur("pseudonyme invalide")
+                                break
 
-                        if pseudo in [d.pseudo for d in _clients.values()]:
-                            self.erreur("pseudonyme déjà pris")
-                            break
+                            if pseudo in [d.pseudo for d in _clients.values()]:
+                                self.erreur("pseudonyme déjà pris")
+                                break
 
-                        _clients[self.request].pseudo = pseudo
-                        print(f"({self.client_address[0]}) connecté en tant que '{pseudo}'")
+                            _clients[self.request].pseudo = pseudo
+                            print(
+                                f"({self.client_address[0]}) connecté en tant que '{pseudo}'"
+                            )
 
-                        self.envoyer(_paquet_couleur(_couleur_client(n_client)))
-                        if n_client == 0:
-                            self.envoyer(_paquet_tour())
+                            self.envoyer(_paquet_couleur(_couleur_client(n_client)))
+                            if n_client == 0:
+                                self.envoyer(_paquet_tour())
                     case PaquetClientType.PRET.value:
-                        self.mettre_pret()
-                        print(f"({self.client_address[0]}) {pseudo} : prêt")
+                        if _jeu.partie.debut and not _jeu.partie.fin:
+                            self.erreur("La partie est déjà commencée !")
+                        else:
+                            self.mettre_pret()
+                            print(f"({self.client_address[0]}) {pseudo} : prêt")
 
-                        if len(_clients) == 2:
-                            tous_prets = all(d.etat_pret for d in _clients.values())
+                            if len(_clients) == 2:
+                                tous_prets = all(d.etat_pret for d in _clients.values())
 
-                            if tous_prets:
-                                _jeu.affecter_sockets()
-                                noir, blanc = _jeu.sock_noir, _jeu.sock_blanc
+                                if tous_prets:
+                                    _jeu.affecter_sockets()
+                                    noir, blanc = _jeu.sock_noir, _jeu.sock_blanc
 
-                                _jeu.partie.demarrer(
-                                    _clients[noir].pseudo, _clients[blanc].pseudo
-                                )
-                                _diffuser(_paquet_lancement())
-                                print("Partie lancée")
+                                    _jeu.partie.demarrer(
+                                        _clients[noir].pseudo, _clients[blanc].pseudo
+                                    )
+                                    _diffuser(_paquet_lancement())
+                                    print("Partie lancée")
                     case PaquetClientType.DEPLACER.value:
                         if _jeu.partie.fin:
                             self.erreur("La partie est déjà finie !")
@@ -302,11 +313,9 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                             if cible in _jeu.partie.damier.trouver_cases_possibles(
                                 *source
                             ):
-                                saut = _jeu.partie.damier.deplacer_pion(source, cible)
-                                if saut:
-                                    _jeu.statistiques(self.request).sauter()
-
+                                sauts = _jeu.partie.damier.deplacer_pion(source, cible)
                                 _diffuser(_paquet_deplacements([source, cible]))
+                                _jeu.statistiques(self.request).sauter(len(sauts))
 
                                 if gagnant := _jeu.partie.damier.gagnant():
                                     _jeu.partie.arreter()
@@ -315,30 +324,66 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                                 elif _jeu.partie.damier.est_bloque():
                                     _jeu.partie.arreter()
                                     _diffuser(_paquet_conclusion(None))
-                                    print(f"Partie terminée : aucun gagnant")
+                                    print("Partie terminée : aucun gagnant")
+                                else:
+                                    # redonner au joueur encore un tour s'il peut sauter par dessus des pions adverses
+                                    encore = False
+
+                                    if sauts:
+                                        for (
+                                            c
+                                        ) in _jeu.partie.damier.trouver_cases_possibles(
+                                            *cible
+                                        ):
+                                            if encore := bool(
+                                                _jeu.partie.damier.deplacer_pion(
+                                                    cible, c, False
+                                                )
+                                            ):
+                                                break
+
+                                    adversaire = next(
+                                        (
+                                            c
+                                            for c in _clients.keys()
+                                            if c != self.request
+                                        ),
+                                        None,
+                                    )
+
+                                    if encore:
+                                        self.envoyer(_paquet_tour(cible))
+                                    elif not adversaire:
+                                        self.envoyer(_paquet_tour())
+                                    else:
+                                        _envoyer(adversaire, _paquet_tour())
                             else:
                                 self.erreur(
                                     f"déplacement illégal : {source} -> {cible}"
                                 )
+                    case PaquetClientType.ANNULER.value:
+                        adversaire = next(
+                            (c for c in _clients.keys() if c != self.request),
+                            None,
+                        )
 
-                            adversaire = next(
-                                (c for c in _clients.keys() if c != self.request), None
-                            )
-                            tour = _paquet_tour()
-
-                            if adversaire:
-                                _envoyer(adversaire, tour)
-                            else:
-                                self.envoyer(tour)
+                        if adversaire:
+                            _envoyer(adversaire, _paquet_tour())
+                        else:
+                            self.erreur("aucun adversaire trouvé !")
                     case _:
-                        self.erreur("paquet de type inconnu")
+                        self.erreur(f"paquet de type inconnu ({paquet.type()})")
                         break
             except (IndexError, KeyError):
-                self.erreur("paquet mal formé")
+                self.erreur(f"paquet mal formé ({paquet})")
+                print(traceback.format_exc())
                 break
 
     def finish(self):
+        global _clients
+
         if _clients:
+            _clients.pop(self.request, None)
             for donnees in _clients.values():
                 donnees.etat_pret = False
             _diffuser(_paquet_attente())
@@ -366,11 +411,11 @@ def _paquet_lancement() -> Paquet:
     return Paquet([PaquetServeurType.LANCEMENT, _jeu.partie.damier.matrice])
 
 
-def _paquet_conclusion(gagnant: CouleurPion | None) -> Paquet:
+def _paquet_conclusion(gagnant: Pion | None) -> Paquet:
     return Paquet([PaquetServeurType.CONCLUSION, gagnant])
 
 
-def _paquet_couleur(couleur: CouleurPion) -> Paquet:
+def _paquet_couleur(couleur: Pion) -> Paquet:
     return Paquet([PaquetServeurType.COULEUR, couleur])
 
 
@@ -378,8 +423,12 @@ def _paquet_deplacements(deplacements: list[tuple[int, int]]) -> Paquet:
     return Paquet([PaquetServeurType.DEPLACEMENTS, deplacements])
 
 
-def _paquet_tour() -> Paquet:
-    return Paquet([PaquetServeurType.TOUR])
+def _paquet_modification(position: tuple[int, int], nouveau: Pion) -> Paquet:
+    return Paquet([PaquetServeurType.MODIFICATION, position, nouveau])
+
+
+def _paquet_tour(position: tuple[int, int] | None = None) -> Paquet:
+    return Paquet([PaquetServeurType.TOUR, position])
 
 
 def _envoyer(client, paquet: Paquet):
@@ -393,8 +442,8 @@ def _diffuser(paquet: Paquet):
         donnees.file_paquets.append(octets)
 
 
-def _couleur_client(n: int) -> CouleurPion:
-    return CouleurPion(1 + n % 2)
+def _couleur_client(n: int) -> Pion:
+    return Pion(1 + n % 2)
 
 
 def demarrer(destination: str, port: int):

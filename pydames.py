@@ -46,5 +46,6 @@ if __name__ == "__main__":
     while ecran.poll():
         ecran.rendre()
 
+    ecran.fini()
     mp.client.arreter()
     gui.fini()

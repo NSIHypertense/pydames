@@ -7,7 +7,7 @@ import numpy as np
 from OpenGL import GL
 import imgui
 
-from logic.damier import CouleurPion, DAMIER_LARGEUR, DAMIER_LONGUEUR
+from logic.damier import Pion, DAMIER_LARGEUR, DAMIER_LONGUEUR
 import mp.client
 import util
 
@@ -108,6 +108,10 @@ class Scene(ABC):
 
     @abstractmethod
     def rendre(self, t: float):
+        pass
+
+    @abstractmethod
+    def fini(self):
         pass
 
 
@@ -272,6 +276,9 @@ class SceneTitre(Scene):
                     self.popup_reglages = False
                     imgui.close_current_popup()
 
+    def fini(self):
+        pass
+
 
 class SceneAttente(Scene):
     prochaine_scene = None
@@ -337,7 +344,7 @@ class SceneAttente(Scene):
 
         imgui.dummy(1, 10)
 
-        largeur_bouton = (
+        longueur_bouton = (
             max(
                 imgui.calc_text_size("Prêt")[0],
                 imgui.calc_text_size("Déconnecter")[0],
@@ -345,13 +352,12 @@ class SceneAttente(Scene):
             + 20
         )
 
-        total_larg = largeur_bouton * 2 + 20
-        imgui.set_cursor_pos_x((longueur_popup - total_larg) / 2)
+        imgui.set_cursor_pos_x((longueur_popup - (longueur_bouton * 2 + 20)) / 2)
 
         if etat_pret:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
             imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-        if imgui.button("Prêt", largeur_bouton, 30):
+        if imgui.button("Prêt", longueur_bouton, 30):
             mp.client.pret = True
             mp.client.envoyer(mp.client.paquet_pret())
         if etat_pret:
@@ -360,11 +366,14 @@ class SceneAttente(Scene):
 
         imgui.same_line(spacing=20)
 
-        if imgui.button("Déconnecter", largeur_bouton, 30):
+        if imgui.button("Déconnecter", longueur_bouton, 30):
             mp.client.arreter()
             self.prochaine_scene = SceneTitre()
 
         imgui.end()
+
+    def fini(self):
+        pass
 
 
 class SceneDamier(Scene):
@@ -480,7 +489,7 @@ class SceneDamier(Scene):
             GL.glBindVertexArray(0)
             GL.glDisable(GL.GL_BLEND)
 
-        def __del__(self):
+        def fini(self):
             GL.glDeleteBuffers(2, [self.buffer_sommets, self.buffer_couleurs])
             GL.glDeleteVertexArrays(1, [self.vao])
 
@@ -501,8 +510,8 @@ class SceneDamier(Scene):
             )
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
 
-        def __init__(self, x: int, y: int, couleur: CouleurPion):
-            self.position, self.couleur = (x, y), couleur.value
+        def __init__(self, x: int, y: int, type: Pion):
+            self.position, self.type, self.dame = (x, y), type, False
 
             self.programme = creer_programme_shader(
                 "shader/pion_vert.glsl", "shader/pion_frag.glsl"
@@ -523,6 +532,9 @@ class SceneDamier(Scene):
             self.uniform_pion_selection = GL.glGetUniformLocation(
                 self.programme, "pion_selection"
             )
+            self.uniform_pion_dame = GL.glGetUniformLocation(
+                self.programme, "pion_dame"
+            )
 
             GL.glUseProgram(self.programme)
             GL.glUniform2f(self.uniform_damier_taille, DAMIER_LONGUEUR, DAMIER_LARGEUR)
@@ -542,10 +554,11 @@ class SceneDamier(Scene):
             GL.glUseProgram(self.programme)
 
             GL.glUniform1f(self.uniform_t, t)
-            GL.glUniform2f(self.uniform_pion_position, *self.position)
-            GL.glUniform1i(self.uniform_pion_couleur, self.couleur)
-            GL.glUniform1i(self.uniform_pion_selection, selection)
             GL.glUniform2f(self.uniform_fenetre_taille, longueur, largeur)
+            GL.glUniform2f(self.uniform_pion_position, *self.position)
+            GL.glUniform1i(self.uniform_pion_couleur, self.type.couleur().value)
+            GL.glUniform1i(self.uniform_pion_selection, selection)
+            GL.glUniform1i(self.uniform_pion_dame, self.type.est_dame())
 
             GL.glEnable(GL.GL_BLEND)
             GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
@@ -593,6 +606,8 @@ class SceneDamier(Scene):
             pion = next((p for p in self.pions if p.position == source), None)
 
             if pion:
+                pion.type = mp.client.damier.obtenir_pion(*cible)
+                assert pion.type
                 pion.position = cible
             else:
                 print("impossible d'effectuer le déplacement !")
@@ -619,16 +634,25 @@ class SceneDamier(Scene):
         self.damier.rendre(t, self.longueur, self.largeur)
         self.overlay.rendre(t, self.longueur, self.largeur)
 
+        if mp.client.selection:
+            self.pion_curseur = mp.client.selection
+            self.__cases_possibles = [
+                c
+                for c in mp.client.damier.trouver_cases_possibles(*mp.client.selection)
+                if len(mp.client.damier.deplacer_pion(self.pion_curseur, c, False)) > 0
+            ]
+            self.overlay.set_cases(self.__cases_possibles)
+
         damier_curseur = (
             self.curseur[0] * DAMIER_LONGUEUR // self.longueur,
             self.curseur[1] * DAMIER_LARGEUR // self.largeur,
         )
-        
+
         selection_est_pion = (
-            mp.client.damier is not None
+            bool(mp.client.damier)
             and 0 <= damier_curseur[0] < DAMIER_LONGUEUR
             and 0 <= damier_curseur[1] < DAMIER_LARGEUR
-            and mp.client.damier.obtenir_pion(*damier_curseur) is not None
+            and mp.client.damier.obtenir_pion(*damier_curseur)
         )
 
         if (
@@ -641,24 +665,56 @@ class SceneDamier(Scene):
             )
 
         for pion in self.pions:
-            selection = (
-                selection_est_pion
-                and pion.couleur == mp.client.couleur.value
-                and damier_curseur[0] == pion.position[0]
-                and damier_curseur[1] == pion.position[1]
-            )
+            if mp.client.selection:
+                pion.rendre(t, self.longueur, self.largeur, False)
+            else:
+                selection = (
+                    selection_est_pion
+                    and pion.type.couleur() == mp.client.couleur
+                    and damier_curseur[0] == pion.position[0]
+                    and damier_curseur[1] == pion.position[1]
+                ) or False
 
-            if selection and self.appui:
-                self.pion_curseur = damier_curseur
-                self.__cases_possibles = sorted(
-                    mp.client.damier.trouver_cases_possibles(*pion.position)
-                )
-                self.overlay.set_cases(self.__cases_possibles.copy())
+                if selection and self.appui:
+                    self.pion_curseur = damier_curseur
+                    self.__cases_possibles = mp.client.damier.trouver_cases_possibles(
+                        *pion.position
+                    )
+                    self.overlay.set_cases(self.__cases_possibles)
 
-            pion.rendre(t, self.longueur, self.largeur, selection)
+                pion.rendre(t, self.longueur, self.largeur, selection)
 
         GL.glUseProgram(0)
 
-    @property
-    def cases_possibles(self):
-        return self.__cases_possibles
+        if mp.client.tour:
+            taille = (125, 55)
+            imgui.set_next_window_size(*taille)
+            imgui.set_next_window_position(
+                self.longueur - taille[0], self.largeur - taille[1]
+            )
+
+            imgui.begin(
+                "À votre tour",
+                flags=imgui.WINDOW_NO_MOVE
+                | imgui.WINDOW_NO_RESIZE
+                | imgui.WINDOW_NO_COLLAPSE,
+            )
+
+            texte = "Annuler"
+            taille_texte = imgui.calc_text_size(texte)
+
+            y = imgui.get_cursor_pos_y()
+            imgui.set_cursor_pos_x(
+                (taille[0] - taille_texte[0]) / 2,
+            )
+
+            if imgui.button(texte):
+                mp.client.tour = False
+                self.__cases_possibles = []
+                self.overlay.set_cases(self.__cases_possibles)
+                mp.client.envoyer(mp.client.paquet_annuler())
+
+            imgui.end()
+
+    def fini(self):
+        self.damier.fini()

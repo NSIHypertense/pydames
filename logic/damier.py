@@ -4,9 +4,40 @@ DAMIER_LONGUEUR = 8
 DAMIER_LARGEUR = 8
 
 
-class CouleurPion(Enum):
+class Pion(Enum):
     NOIR = 1
     BLANC = 2
+    DAME_NOIR = 3
+    DAME_BLANC = 4
+
+    def couleur(self):
+        match self:
+            case Pion.NOIR:
+                return Pion.NOIR
+            case Pion.BLANC:
+                return Pion.BLANC
+            case Pion.DAME_NOIR:
+                return Pion.NOIR
+            case Pion.DAME_BLANC:
+                return Pion.BLANC
+            case _:
+                raise NotImplementedError("pion inconnu")
+
+    def dame(self):
+        match self:
+            case Pion.NOIR:
+                return Pion.DAME_NOIR
+            case Pion.BLANC:
+                return Pion.DAME_BLANC
+            case Pion.DAME_NOIR:
+                return Pion.DAME_NOIR
+            case Pion.DAME_BLANC:
+                return Pion.DAME_BLANC
+            case _:
+                raise NotImplementedError("pion inconnu")
+
+    def est_dame(self):
+        return self.dame() == self
 
 
 class Damier:
@@ -14,7 +45,15 @@ class Damier:
         self.__longueur, self.__largeur = longueur, largeur
         self.vider()
 
-    def from_matrice(matrice: list[list[CouleurPion | int | None]]) -> "Damier":
+    def __str__(self):
+        matrice_transposee = list(map(list, zip(*self.__matrice)))
+        s = ""
+        for i in range(len(matrice_transposee)):
+            s += str([p.value if p else 0 for p in matrice_transposee[i]]) + "\n"
+        s += "\n"
+        return s
+
+    def from_matrice(matrice: list[list[Pion | int | None]]) -> "Damier":
         assert matrice != [] and matrice[0] != []
 
         longueur, largeur = len(matrice), len(matrice[0])
@@ -25,8 +64,8 @@ class Damier:
             for y in range(largeur):
                 valeur = matrice[x][y]
                 if isinstance(valeur, int):
-                    valeur = CouleurPion(valeur)
-                assert not valeur or isinstance(valeur, CouleurPion)
+                    valeur = Pion(valeur)
+                assert not valeur or isinstance(valeur, Pion)
                 damier.__matrice[x][y] = valeur
 
         return damier
@@ -40,7 +79,7 @@ class Damier:
         return self.__largeur
 
     @property
-    def matrice(self) -> list[list[CouleurPion | None]]:
+    def matrice(self) -> list[list[Pion | None]]:
         return [rang.copy() for rang in self.__matrice]  # copie de liste 2D
 
     def vider(self):
@@ -53,16 +92,16 @@ class Damier:
 
         for y in range(0, n):
             for x in range((y + 1) % 2, self.__longueur, 2):
-                self.__matrice[x][y] = CouleurPion.NOIR
+                self.__matrice[x][y] = Pion.NOIR
         for y in range(self.__largeur - n, self.__largeur):
             for x in range((y + 1) % 2, self.__longueur, 2):
-                self.__matrice[x][y] = CouleurPion.BLANC
+                self.__matrice[x][y] = Pion.BLANC
 
-    def obtenir_pion(self, x: int, y: int) -> CouleurPion | None:
+    def obtenir_pion(self, x: int, y: int) -> Pion | None:
         assert 0 <= x < self.__longueur and 0 <= y < self.__largeur
         return self.__matrice[x][y]
 
-    def ajouter_pion(self, x: int, y: int, couleur: CouleurPion):
+    def ajouter_pion(self, x: int, y: int, couleur: Pion):
         assert 0 <= x < self.__longueur and 0 <= y < self.__largeur
         self.__matrice[x][y] = couleur
 
@@ -71,80 +110,104 @@ class Damier:
         self.__matrice[x][y] = None
 
     def deplacer_pion(
-        self, position_source: tuple[int, int], position_cible: tuple[int, int]
-    ) -> tuple[int, int] | None:
-        case_sautee = None
+        self,
+        position_source: tuple[int, int],
+        position_cible: tuple[int, int],
+        effectuer: bool = True,
+    ) -> list[tuple[int, int]]:
+        cases_sautees = []
 
         x_src, y_src = position_source
         x_dst, y_dst = position_cible
 
         assert 0 <= x_src < self.__longueur and 0 <= y_src < self.__largeur
-        assert self.__matrice[x_src][y_src] is not None
+        assert self.__matrice[x_src][y_src]
         assert 0 <= x_dst < self.__longueur and 0 <= y_dst < self.__largeur
 
-        if abs(x_dst - x_src) == 2 and abs(y_dst - y_src) == 2:
-            x_inter = (x_src + x_dst) // 2
-            y_inter = (y_src + y_dst) // 2
+        d = x_dst - x_src
+        assert abs(d) == abs(y_dst - y_src)
 
-            if self.__matrice[x_inter][y_inter] is not None:
-                case_sautee = (x_inter, y_inter)
-                self.enlever_pion(x_inter, y_inter)
+        pion = self.__matrice[x_src][y_src]
 
-        self.__matrice[x_dst][y_dst] = self.__matrice[x_src][y_src]
-        self.__matrice[x_src][y_src] = None
+        for dx in range(0, d, 1 if d > 0 else -1):
+            dy = dx if (y_dst - y_src) > 0 else -dx
+            if d < 0:
+                dy = -dy
+            n = (x_src + dx, y_src + dy)
 
-        return case_sautee
+            if 0 <= n[1] < self.__largeur:
+                if self.__matrice[n[0]][n[1]]:
+                    if n[0] != x_src and n[1] != y_src:
+                        cases_sautees.append(n)
+                    if effectuer:
+                        self.__matrice[n[0]][n[1]] = None
+
+        modification_dame = (pion == Pion.NOIR and y_dst == self.__largeur - 1) or (
+            pion == Pion.BLANC and y_dst == 0
+        )
+
+        if effectuer:
+            if modification_dame:
+                pion = pion.dame()
+            self.__matrice[x_dst][y_dst] = pion
+
+        return cases_sautees
 
     def trouver_cases_possibles(self, x: int, y: int) -> list[tuple[int, int]]:
         assert 0 <= x < self.__longueur and 0 <= y < self.__largeur
 
         cases = []
-        couleur = self.__matrice[x][y]
-        if not couleur:
+        pion = self.__matrice[x][y]
+        if not pion:
             return cases
 
-        direction = 1 if couleur == CouleurPion.NOIR else -1
+        directions = [(-1, -1), (-1, 1), (1, -1), (1, 1)]
+        max_distance = max(self.__longueur, self.__largeur) if pion.est_dame() else 2
+        avance = 1 if pion.couleur() == Pion.NOIR else -1
 
-        for dx in [-1, 1]:
-            nx, ny = x + dx, y + direction
+        for d in directions:
+            if not pion.est_dame() and d[1] != avance:
+                continue
 
-            if (
-                0 <= nx < self.__longueur
-                and 0 <= ny < self.__largeur
-                and self.__matrice[nx][ny] is None
-            ):
-                cases.append((nx, ny))
+            for dist in range(1, max_distance):
+                n = (x + d[0] * dist, y + d[1] * dist)
 
-            nx, ny = x + 2 * dx, y + 2 * direction
+                if not (0 <= n[0] < self.__longueur and 0 <= n[1] < self.__largeur):
+                    break
 
-            if 0 <= nx < self.__longueur and 0 <= ny < self.__largeur:
-                pion_inter = self.__matrice[x + dx][y + direction]
-                if (
-                    pion_inter is not None
-                    and pion_inter != couleur
-                    and self.__matrice[nx][ny] is None
-                ):
-                    cases.append((nx, ny))
+                case = self.__matrice[n[0]][n[1]]
+                if case:
+                    if pion.couleur() != case.couleur():
+                        saut = (n[0] + d[0], n[1] + d[1])
+                        if (
+                            0 <= saut[0] < self.__longueur
+                            and 0 <= saut[1] < self.__largeur
+                            and not self.__matrice[saut[0]][saut[1]]
+                        ):
+                            cases.append(saut)
+                else:
+                    if pion.est_dame() or dist == 1:
+                        cases.append(n)
 
         return cases
 
-    def gagnant(self) -> CouleurPion | None:
+    def gagnant(self) -> Pion | None:
         pions_noirs = any(
-            self.__matrice[x][y] == CouleurPion.NOIR
+            self.__matrice[x][y] and self.__matrice[x][y].couleur() == Pion.NOIR
             for x in range(self.__longueur)
             for y in range(self.__largeur)
         )
 
         pions_blancs = any(
-            self.__matrice[x][y] == CouleurPion.BLANC
+            self.__matrice[x][y] and self.__matrice[x][y].couleur() == Pion.BLANC
             for x in range(self.__longueur)
             for y in range(self.__largeur)
         )
 
         if not pions_noirs:
-            return CouleurPion.BLANC
+            return Pion.BLANC
         if not pions_blancs:
-            return CouleurPion.NOIR
+            return Pion.NOIR
 
         return None
 
@@ -153,14 +216,14 @@ class Damier:
             self.trouver_cases_possibles(x, y)
             for x in range(self.__longueur)
             for y in range(self.__largeur)
-            if self.__matrice[x][y] == CouleurPion.NOIR
+            if self.__matrice[x][y] and self.__matrice[x][y].couleur() == Pion.NOIR
         )
 
         blanc_peut_jouer = any(
             self.trouver_cases_possibles(x, y)
             for x in range(self.__longueur)
             for y in range(self.__largeur)
-            if self.__matrice[x][y] == CouleurPion.BLANC
+            if self.__matrice[x][y] and self.__matrice[x][y].couleur() == Pion.BLANC
         )
 
         return not blanc_peut_jouer and not noir_peut_jouer

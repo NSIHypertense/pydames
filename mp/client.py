@@ -5,7 +5,7 @@ import threading
 
 from ormsgpack import MsgpackDecodeError
 
-from logic.damier import CouleurPion, Damier
+from logic.damier import Pion, Damier
 
 from . import Paquet, PaquetClientType, PaquetServeurType
 
@@ -18,6 +18,7 @@ connexion_erreur = False
 serveur = None
 sock = None
 thread = None
+lock = threading.Lock()
 
 # Partie
 attente = True
@@ -27,6 +28,7 @@ damier = None
 tour = False
 deplacements = []
 sauts = []
+selection = None
 
 
 def paquet_handshake(pseudo: str) -> Paquet:
@@ -39,6 +41,10 @@ def paquet_pret() -> Paquet:
 
 def paquet_deplacer(source: tuple[int, int], cible: tuple[int, int]) -> Paquet:
     return Paquet([PaquetClientType.DEPLACER, source, cible])
+
+
+def paquet_annuler() -> Paquet:
+    return Paquet([PaquetClientType.ANNULER])
 
 
 def erreur(*args, **kwargs):
@@ -62,6 +68,7 @@ def thread_client():
     global tour
     global deplacements
     global sauts
+    global selection
 
     while sock:
         parties = []
@@ -121,7 +128,7 @@ def thread_client():
                     if gagnant:
                         print(
                             "Les",
-                            "noirs" if gagnant == CouleurPion.NOIR.value else "blancs",
+                            "noirs" if gagnant == Pion.NOIR.value else "blancs",
                             "ont remporté la victoire.",
                         )
                     else:
@@ -130,22 +137,22 @@ def thread_client():
                     arreter()
                     return
                 case PaquetServeurType.COULEUR.value:
-                    couleur = CouleurPion(paquet.x[1])
+                    couleur = Pion(paquet.x[1])
                 case PaquetServeurType.DEPLACEMENTS.value:
                     tour = False
+
                     for i in range(0, len(paquet.x[1]), 2):
                         source, cible = tuple(paquet.x[1][i]), tuple(paquet.x[1][i + 1])
                         deplacements.extend([source, cible])
-                        saut = damier.deplacer_pion(source, cible)
-                        if saut:
-                            sauts.append(saut)
+                        sauts.extend(damier.deplacer_pion(source, cible))
                 case PaquetServeurType.TOUR.value:
                     tour = True
+                    selection = paquet.x[1]
                 case _:
                     erreur("paquet de type inconnu")
                     return
         except (IndexError, KeyError):
-            erreur("paquet mal formé")
+            erreur(f"paquet mal formé ({paquet.x})")
             return
 
 
@@ -156,16 +163,17 @@ def demarrer(destination: str, port: int):
     global sock
     global thread
 
-    serveur = (destination, port)
+    with lock:
+        serveur = (destination, port)
 
-    print("création du socket")
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    print("connexion TCP au serveur...")
-    sock.connect((destination, port))
-    print("connexion TCP établie")
+        print("création du socket")
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        print("connexion TCP au serveur...")
+        sock.connect((destination, port))
+        print("connexion TCP établie")
 
-    connexion_erreur = False
-    connexion_succes = False
+        connexion_erreur = False
+        connexion_succes = False
 
     thread = threading.Thread(target=thread_client)
     thread.start()
@@ -180,17 +188,18 @@ def arreter():
     global sock
     global thread
 
-    pret = False
-    attente = True
+    with lock:
+        pret = False
+        attente = True
 
-    connexion_erreur = False
-    connexion_succes = False
+        connexion_erreur = False
+        connexion_succes = False
 
-    if sock:
-        print("arrêt du client...")
-        sock.shutdown(socket.SHUT_RDWR)
-        sock.close()
-        sock = None
+        if sock:
+            print("arrêt du client...")
+            sock.shutdown(socket.SHUT_RDWR)
+            sock.close()
+            sock = None
 
     if thread:
         if thread is not threading.current_thread():
