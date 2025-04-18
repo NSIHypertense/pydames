@@ -292,13 +292,17 @@ class SceneSalons(Scene):
         self.code_salon = ""
 
     def rendre(self, t):
+        if not mp.client.sock or mp.client.connexion_erreur:
+            self.prochaine_scene = SceneTitre()
+            return
+
         io = imgui.get_io()
         echelle = io.font_global_scale
 
         longueur_fenetre = io.display_size.x
         largeur_fenetre = io.display_size.y
 
-        longueur_popup = max(int(longueur_fenetre / 2), 500)
+        longueur_popup = max(int(longueur_fenetre / 2), 450)
         largeur_popup = max(largeur_fenetre // 6, 120)
 
         imgui.set_next_window_size(longueur_popup, largeur_popup)
@@ -357,7 +361,7 @@ class SceneAttente(Scene):
     clic = False
 
     def rendre(self, t):
-        if mp.client.connexion_erreur:
+        if not mp.client.sock or mp.client.connexion_erreur:
             self.prochaine_scene = SceneTitre()
             return
         elif mp.client.connexion_succes and not mp.client.attente:
@@ -676,7 +680,7 @@ class SceneDamier(Scene):
         self.pion_curseur = None
 
     def rendre(self, t):
-        if not mp.client.sock:
+        if not mp.client.sock or mp.client.connexion_erreur:
             self.prochaine_scene = SceneTitre()
             return
         elif mp.client.attente:

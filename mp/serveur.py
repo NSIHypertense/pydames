@@ -86,11 +86,10 @@ class Jeu:
         return self.__joueurs.copy()
 
     def affecter_sockets(self):
-        tab_clients = list(_clients)
-        assert len(tab_clients) == 2
+        assert len(self.clients) == 2
 
-        self.__sock_noir = tab_clients[0]
-        self.__sock_blanc = tab_clients[1]
+        self.__sock_noir = self.clients[0]
+        self.__sock_blanc = self.clients[1]
 
     def couleur(self, sock) -> Pion | None:
         if sock == self.__sock_noir:
