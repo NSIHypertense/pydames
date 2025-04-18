@@ -136,7 +136,8 @@ class Damier:
             n = (x_src + dx, y_src + dy)
 
             if 0 <= n[1] < self.__largeur:
-                if self.__matrice[n[0]][n[1]]:
+                p = self.__matrice[n[0]][n[1]]
+                if p:
                     if n[0] != x_src and n[1] != y_src:
                         cases_sautees.append(n)
                     if effectuer:
@@ -185,6 +186,8 @@ class Damier:
                             and not self.__matrice[saut[0]][saut[1]]
                         ):
                             cases.append(saut)
+                    else:
+                        break
                 else:
                     if pion.est_dame() or dist == 1:
                         cases.append(n)

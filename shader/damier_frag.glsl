@@ -3,6 +3,7 @@
 uniform float t;
 uniform vec2 damier_taille;
 uniform vec2 fenetre_taille;
+uniform vec2 fenetre_position;
 
 in vec4 couleur;
 out vec4 frag_couleur;
@@ -13,7 +14,7 @@ float vignette(vec2 v, float i, float m) {
 }
 
 void main() {
-    vec2 uv = gl_FragCoord.xy / fenetre_taille;
+    vec2 uv = (gl_FragCoord.xy - fenetre_position) / fenetre_taille;
     vec2 d = uv * damier_taille * 2;
 
     if (couleur.w == 0 && couleur.xyz != vec3(0, 0, 0)) {

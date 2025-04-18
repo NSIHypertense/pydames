@@ -19,6 +19,7 @@ serveur = None
 sock = None
 thread = None
 lock = threading.Lock()
+salon = None
 
 # Partie
 attente = True
@@ -33,6 +34,10 @@ selection = None
 
 def paquet_handshake(pseudo: str) -> Paquet:
     return Paquet([PaquetClientType.HANDSHAKE, pseudo])
+
+
+def paquet_salon(code: str) -> Paquet:
+    return Paquet([PaquetClientType.SALON, code])
 
 
 def paquet_pret() -> Paquet:
@@ -53,6 +58,10 @@ def erreur(*args, **kwargs):
 
 
 def envoyer(paquet: Paquet):
+    if not sock:
+        erreur("sock est None !")
+        return
+
     octets = paquet.serialiser()
     octets = len(octets).to_bytes(4, byteorder="little", signed=False) + octets
     sock.sendall(octets)
@@ -60,6 +69,7 @@ def envoyer(paquet: Paquet):
 
 def thread_client():
     global connexion_succes
+    global salon
 
     global attente
     global pret
@@ -113,6 +123,9 @@ def thread_client():
                 case PaquetServeurType.ERREUR.value:
                     erreur(paquet.x[1])
                     return
+                case PaquetServeurType.SALON.value:
+                    salon = paquet.x[1]
+                    print(f"code salon : {salon}")
                 case PaquetServeurType.ATTENTE.value:
                     print("L'adversaire s'est déconnecté du serveur.")
                     pret = False

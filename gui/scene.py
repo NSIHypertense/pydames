@@ -149,6 +149,7 @@ class SceneTitre(Scene):
 
     def rendre(self, t):
         io = imgui.get_io()
+        echelle = io.font_global_scale
 
         longueur_fenetre = io.display_size.x
         largeur_fenetre = io.display_size.y
@@ -173,8 +174,8 @@ class SceneTitre(Scene):
 
         imgui.dummy(1, 30)
 
-        longueur_bouton = 150
-        largeur_bouton = 30
+        longueur_bouton = 150 * echelle
+        largeur_bouton = 30 * echelle
 
         imgui.set_cursor_pos_x((longueur - longueur_bouton) / 2)
         if imgui.button("Commencer", longueur_bouton, largeur_bouton):
@@ -241,7 +242,7 @@ class SceneTitre(Scene):
                         self.connexion_erreur = t + 2
                     elif mp.client.connexion_succes:
                         self.connexion = False
-                        self.prochaine_scene = SceneAttente()
+                        self.prochaine_scene = SceneSalons()
                         self.popup_commencer = False
                         imgui.close_current_popup()
                 elif t < self.connexion_erreur:
@@ -280,6 +281,74 @@ class SceneTitre(Scene):
         pass
 
 
+class SceneSalons(Scene):
+    prochaine_scene = None
+    longueur = None
+    largeur = None
+    curseur = None
+    clic = False
+
+    def __init__(self):
+        self.code_salon = ""
+
+    def rendre(self, t):
+        io = imgui.get_io()
+        echelle = io.font_global_scale
+
+        longueur_fenetre = io.display_size.x
+        largeur_fenetre = io.display_size.y
+
+        longueur_popup = max(int(longueur_fenetre / 2), 500)
+        largeur_popup = max(largeur_fenetre // 6, 120)
+
+        imgui.set_next_window_size(longueur_popup, largeur_popup)
+        imgui.set_next_window_position(
+            (longueur_fenetre - longueur_popup) / 2,
+            (largeur_fenetre - largeur_popup) / 2,
+        )
+
+        imgui.begin(
+            "Salons",
+            False,
+            imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_COLLAPSE | imgui.WINDOW_NO_MOVE,
+        )
+
+        _, code_salon = imgui.input_text("Code du salon", self.code_salon)
+        if not code_salon:
+            imgui.text("Un code aléatoire à 4 chiffres sera généré pour le salon.")
+            self.code_salon = code_salon
+        elif not (4 <= len(code_salon) <= 32):
+            imgui.text("Le code du salon doit comporter entre 4 et 32 caractères.")
+        else:
+            self.code_salon = code_salon
+
+        imgui.dummy(1, 10)
+
+        longueur = (
+            max(
+                imgui.calc_text_size("Confirmer")[0],
+                imgui.calc_text_size("Déconnecter")[0],
+            )
+            + 20
+        )
+
+        imgui.set_cursor_pos_x((longueur_popup - (2 * longueur + 20)) / 2)
+
+        if imgui.button("Confirmer", longueur, 30 * echelle):
+            mp.client.envoyer(mp.client.paquet_salon(self.code_salon))
+            self.prochaine_scene = SceneAttente()
+
+        imgui.same_line(spacing=20)
+        if imgui.button("Déconnecter", longueur, 30 * echelle):
+            mp.client.arreter()
+            self.prochaine_scene = SceneTitre()
+
+        imgui.end()
+
+    def fini(self):
+        pass
+
+
 class SceneAttente(Scene):
     prochaine_scene = None
     longueur = None
@@ -296,11 +365,13 @@ class SceneAttente(Scene):
             return
 
         io = imgui.get_io()
+        echelle = io.font_global_scale
+
         longueur_fenetre = io.display_size.x
         largeur_fenetre = io.display_size.y
 
-        longueur_popup = longueur_fenetre // 2
-        largeur_popup = largeur_fenetre // 4
+        longueur_popup = max(longueur_fenetre // 2, 400)
+        largeur_popup = max(largeur_fenetre // 4, 180)
 
         imgui.set_next_window_size(longueur_popup, largeur_popup)
         imgui.set_next_window_position(
@@ -322,6 +393,15 @@ class SceneAttente(Scene):
                 (longueur_popup - imgui.calc_text_size(texte_connexion)[0]) / 2
             )
             imgui.text(texte_connexion)
+
+        if mp.client.salon:
+            imgui.dummy(1, 10)
+            texte_salon = f"Code du salon : '{mp.client.salon}'"
+            imgui.set_cursor_pos_x(
+                (longueur_popup - imgui.calc_text_size(texte_salon)[0]) / 2
+            )
+            imgui.text(texte_salon)
+            imgui.dummy(1, 10)
 
         points = "." * (1 + int(t * 2) % 3)
         etat_pret = mp.client.pret
@@ -357,7 +437,7 @@ class SceneAttente(Scene):
         if etat_pret:
             imgui.internal.push_item_flag(imgui.internal.ITEM_DISABLED, True)
             imgui.push_style_var(imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5)
-        if imgui.button("Prêt", longueur_bouton, 30):
+        if imgui.button("Prêt", longueur_bouton, 30 * echelle):
             mp.client.pret = True
             mp.client.envoyer(mp.client.paquet_pret())
         if etat_pret:
@@ -366,7 +446,7 @@ class SceneAttente(Scene):
 
         imgui.same_line(spacing=20)
 
-        if imgui.button("Déconnecter", longueur_bouton, 30):
+        if imgui.button("Déconnecter", longueur_bouton, 30 * echelle):
             mp.client.arreter()
             self.prochaine_scene = SceneTitre()
 
@@ -387,6 +467,9 @@ class SceneDamier(Scene):
             self.uniform_t = GL.glGetUniformLocation(self.programme, "t")
             self.uniform_fenetre_taille = GL.glGetUniformLocation(
                 self.programme, "fenetre_taille"
+            )
+            self.uniform_fenetre_position = GL.glGetUniformLocation(
+                self.programme, "fenetre_position"
             )
             self.uniform_damier_taille = GL.glGetUniformLocation(
                 self.programme, "damier_taille"
@@ -477,10 +560,11 @@ class SceneDamier(Scene):
 
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
 
-        def rendre(self, t, longueur, largeur):
+        def rendre(self, t, position, taille):
             GL.glUseProgram(self.programme)
             GL.glUniform1f(self.uniform_t, t)
-            GL.glUniform2f(self.uniform_fenetre_taille, longueur, largeur)
+            GL.glUniform2f(self.uniform_fenetre_taille, *taille)
+            GL.glUniform2f(self.uniform_fenetre_position, *position)
 
             GL.glEnable(GL.GL_BLEND)
             GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
@@ -520,6 +604,9 @@ class SceneDamier(Scene):
             self.uniform_fenetre_taille = GL.glGetUniformLocation(
                 self.programme, "fenetre_taille"
             )
+            self.uniform_fenetre_position = GL.glGetUniformLocation(
+                self.programme, "fenetre_position"
+            )
             self.uniform_damier_taille = GL.glGetUniformLocation(
                 self.programme, "damier_taille"
             )
@@ -550,11 +637,12 @@ class SceneDamier(Scene):
             GL.glEnableVertexAttribArray(0)
             GL.glBindVertexArray(0)
 
-        def rendre(self, t, longueur, largeur, selection):
+        def rendre(self, t, position, taille, selection):
             GL.glUseProgram(self.programme)
 
             GL.glUniform1f(self.uniform_t, t)
-            GL.glUniform2f(self.uniform_fenetre_taille, longueur, largeur)
+            GL.glUniform2f(self.uniform_fenetre_taille, *taille)
+            GL.glUniform2f(self.uniform_fenetre_position, *position)
             GL.glUniform2f(self.uniform_pion_position, *self.position)
             GL.glUniform1i(self.uniform_pion_couleur, self.type.couleur().value)
             GL.glUniform1i(self.uniform_pion_selection, selection)
@@ -595,6 +683,9 @@ class SceneDamier(Scene):
             self.prochaine_scene = SceneAttente()
             return
 
+        io = imgui.get_io()
+        echelle = io.font_global_scale
+
         self.appui = not self.clic and self.clic_avant and mp.client.tour
         self.clic_avant = self.clic
 
@@ -631,8 +722,16 @@ class SceneDamier(Scene):
 
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
-        self.damier.rendre(t, self.longueur, self.largeur)
-        self.overlay.rendre(t, self.longueur, self.largeur)
+        rendu_taille = min(self.longueur, self.largeur)
+        rendu_position = (
+            (self.longueur - rendu_taille) // 2,
+            (self.largeur - rendu_taille) // 2,
+        )
+        rendu_taille = (rendu_taille, rendu_taille)
+        GL.glViewport(*rendu_position, *rendu_taille)
+
+        self.damier.rendre(t, rendu_position, rendu_taille)
+        self.overlay.rendre(t, rendu_position, rendu_taille)
 
         if mp.client.selection:
             self.pion_curseur = mp.client.selection
@@ -644,8 +743,8 @@ class SceneDamier(Scene):
             self.overlay.set_cases(self.__cases_possibles)
 
         damier_curseur = (
-            self.curseur[0] * DAMIER_LONGUEUR // self.longueur,
-            self.curseur[1] * DAMIER_LARGEUR // self.largeur,
+            (self.curseur[0] - rendu_position[0]) * DAMIER_LONGUEUR // rendu_taille[0],
+            (self.curseur[1] - rendu_position[1]) * DAMIER_LARGEUR // rendu_taille[1],
         )
 
         selection_est_pion = (
@@ -666,7 +765,7 @@ class SceneDamier(Scene):
 
         for pion in self.pions:
             if mp.client.selection:
-                pion.rendre(t, self.longueur, self.largeur, False)
+                pion.rendre(t, rendu_position, rendu_taille, False)
             else:
                 selection = (
                     selection_est_pion
@@ -682,31 +781,27 @@ class SceneDamier(Scene):
                     )
                     self.overlay.set_cases(self.__cases_possibles)
 
-                pion.rendre(t, self.longueur, self.largeur, selection)
+                pion.rendre(t, rendu_position, rendu_taille, selection)
 
         GL.glUseProgram(0)
 
+        rendu_taille = (125 * echelle, (80 if mp.client.tour else 35) * echelle)
+        imgui.set_next_window_size(*rendu_taille)
+        imgui.set_next_window_position(
+            self.longueur - rendu_taille[0], self.largeur - rendu_taille[1]
+        )
+
+        titre = "À votre tour" if mp.client.tour else "##statut"
+        flags = imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_COLLAPSE
+        if not mp.client.tour:
+            flags |= imgui.WINDOW_NO_TITLE_BAR
+        imgui.begin(titre, flags=flags)
+
         if mp.client.tour:
-            taille = (125, 55)
-            imgui.set_next_window_size(*taille)
-            imgui.set_next_window_position(
-                self.longueur - taille[0], self.largeur - taille[1]
-            )
-
-            imgui.begin(
-                "À votre tour",
-                flags=imgui.WINDOW_NO_MOVE
-                | imgui.WINDOW_NO_RESIZE
-                | imgui.WINDOW_NO_COLLAPSE,
-            )
-
             texte = "Annuler"
             taille_texte = imgui.calc_text_size(texte)
 
-            y = imgui.get_cursor_pos_y()
-            imgui.set_cursor_pos_x(
-                (taille[0] - taille_texte[0]) / 2,
-            )
+            imgui.set_cursor_pos_x((rendu_taille[0] - taille_texte[0]) / 2 - 2)
 
             if imgui.button(texte):
                 mp.client.tour = False
@@ -714,7 +809,16 @@ class SceneDamier(Scene):
                 self.overlay.set_cases(self.__cases_possibles)
                 mp.client.envoyer(mp.client.paquet_annuler())
 
-            imgui.end()
+        texte = "Déconnecter"
+        taille_texte = imgui.calc_text_size(texte)
+
+        imgui.set_cursor_pos_x((rendu_taille[0] - taille_texte[0]) / 2 - 2)
+
+        if imgui.button(texte):
+            mp.client.arreter()
+            self.prochaine_scene = SceneTitre()
+
+        imgui.end()
 
     def fini(self):
         self.damier.fini()

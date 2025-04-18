@@ -4,6 +4,7 @@
 
 uniform float t;
 uniform vec2 fenetre_taille;
+uniform vec2 fenetre_position;
 uniform vec2 damier_taille;
 uniform vec2 pion_position;
 uniform int pion_couleur;
@@ -58,7 +59,7 @@ float bruit(vec2 v) {
 }
 
 void main() {
-    vec2 uv = gl_FragCoord.xy / fenetre_taille;
+    vec2 uv = (gl_FragCoord.xy - fenetre_position) / fenetre_taille;
     uv = vec2(uv.x, 1.0 - uv.y) * damier_taille - 0.5 - pion_position;
 
     float d = sqrt(dot(uv, uv));
