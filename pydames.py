@@ -1,3 +1,4 @@
+import sys
 import argparse
 
 import gui
@@ -35,7 +36,6 @@ if __name__ == "__main__":
         mp.serveur.demarrer(
             util.configuration.socket["adresse"], util.configuration.socket["port"]
         )
-        print()
         mp.serveur.Console().cmdloop()
 
         quit()

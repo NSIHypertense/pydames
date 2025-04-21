@@ -1,8 +1,5 @@
 from enum import Enum
 
-DAMIER_LONGUEUR = 8
-DAMIER_LARGEUR = 8
-
 
 class Pion(Enum):
     NOIR = 1

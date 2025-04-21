@@ -3,8 +3,9 @@ import math
 from OpenGL import GL
 import imgui
 from imgui.integrations.glfw import GlfwRenderer
+import util
 
-from .scene import SceneTitre
+from .scene import SceneTitre, creer_programme_shader
 
 # def blend_argb(a, b):
 #     return (
@@ -48,6 +49,62 @@ _imgui_attributs = [
     "display_window_padding",
     "display_safe_area_padding",
     "mouse_cursor_scale",
+]
+
+_imgui_couleurs = [
+    # imgui.COLOR_TEXT,
+    imgui.COLOR_TEXT_DISABLED,
+    imgui.COLOR_WINDOW_BACKGROUND,
+    imgui.COLOR_CHILD_BACKGROUND,
+    imgui.COLOR_POPUP_BACKGROUND,
+    imgui.COLOR_BORDER,
+    imgui.COLOR_BORDER_SHADOW,
+    imgui.COLOR_FRAME_BACKGROUND,
+    imgui.COLOR_FRAME_BACKGROUND_HOVERED,
+    imgui.COLOR_FRAME_BACKGROUND_ACTIVE,
+    imgui.COLOR_TITLE_BACKGROUND,
+    imgui.COLOR_TITLE_BACKGROUND_ACTIVE,
+    imgui.COLOR_TITLE_BACKGROUND_COLLAPSED,
+    imgui.COLOR_MENUBAR_BACKGROUND,
+    imgui.COLOR_SCROLLBAR_BACKGROUND,
+    imgui.COLOR_SCROLLBAR_GRAB,
+    imgui.COLOR_SCROLLBAR_GRAB_HOVERED,
+    imgui.COLOR_SCROLLBAR_GRAB_ACTIVE,
+    imgui.COLOR_CHECK_MARK,
+    imgui.COLOR_SLIDER_GRAB,
+    imgui.COLOR_SLIDER_GRAB_ACTIVE,
+    imgui.COLOR_BUTTON,
+    imgui.COLOR_BUTTON_HOVERED,
+    imgui.COLOR_BUTTON_ACTIVE,
+    imgui.COLOR_HEADER,
+    imgui.COLOR_HEADER_HOVERED,
+    imgui.COLOR_HEADER_ACTIVE,
+    imgui.COLOR_SEPARATOR,
+    imgui.COLOR_SEPARATOR_HOVERED,
+    imgui.COLOR_SEPARATOR_ACTIVE,
+    imgui.COLOR_RESIZE_GRIP,
+    imgui.COLOR_RESIZE_GRIP_HOVERED,
+    imgui.COLOR_RESIZE_GRIP_ACTIVE,
+    imgui.COLOR_TAB,
+    imgui.COLOR_TAB_HOVERED,
+    imgui.COLOR_TAB_ACTIVE,
+    imgui.COLOR_TAB_UNFOCUSED,
+    imgui.COLOR_TAB_UNFOCUSED_ACTIVE,
+    imgui.COLOR_PLOT_LINES,
+    imgui.COLOR_PLOT_LINES_HOVERED,
+    imgui.COLOR_PLOT_HISTOGRAM,
+    imgui.COLOR_PLOT_HISTOGRAM_HOVERED,
+    imgui.COLOR_TABLE_HEADER_BACKGROUND,
+    imgui.COLOR_TABLE_BORDER_STRONG,
+    imgui.COLOR_TABLE_BORDER_LIGHT,
+    imgui.COLOR_TABLE_ROW_BACKGROUND,
+    imgui.COLOR_TABLE_ROW_BACKGROUND_ALT,
+    imgui.COLOR_TEXT_SELECTED_BACKGROUND,
+    imgui.COLOR_DRAG_DROP_TARGET,
+    imgui.COLOR_NAV_HIGHLIGHT,
+    imgui.COLOR_NAV_WINDOWING_HIGHLIGHT,
+    imgui.COLOR_NAV_WINDOWING_DIM_BACKGROUND,
+    imgui.COLOR_MODAL_WINDOW_DIM_BACKGROUND,
 ]
 
 
@@ -94,9 +151,27 @@ class Ecran:
 
         glfw.make_context_current(self.fenetre)
 
+        self._programme = creer_programme_shader(
+            "shader/quad_vert.glsl", "shader/titre_frag.glsl"
+        )
+        self._uniform_t = GL.glGetUniformLocation(self._programme, "t")
+        self._uniform_fenetre_taille = GL.glGetUniformLocation(
+            self._programme, "fenetre_taille"
+        )
+
         imgui.create_context()
         imgui.get_io().ini_file_name = "".encode()
-        self.__style = copier_style(imgui.get_style())
+
+        style = imgui.get_style()
+        for i in _imgui_couleurs:
+            c = style.colors[i]
+            hsv = util.Couleur.rgb_to_hsv(*c[:3])
+            hsv = ((hsv[0] + 0.06) % 1.0, hsv[1] * 1.4, hsv[2] * max(hsv[2], 0.25))
+            rgb = util.Couleur.hsv_to_rgb(*hsv)
+            rgb = (*rgb[:2], min(rgb[2] + 0.02, 1.0))
+            style.colors[i] = (*rgb, c[3])
+
+        self.__style = copier_style(style)
 
         self.imgui_renderer = GlfwRenderer(self.fenetre)
 
@@ -115,6 +190,8 @@ class Ecran:
 
     def rendre(self):
         io = imgui.get_io()
+        t = glfw.get_time()
+
         longueur, largeur = glfw.get_window_size(self.fenetre)
         echelle = max(min(longueur // 400, largeur // 400) / 2, 1)
 
@@ -126,6 +203,13 @@ class Ecran:
 
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
+        GL.glViewport(0, 0, longueur, largeur)
+        GL.glUseProgram(self._programme)
+        GL.glUniform1f(self._uniform_t, t)
+        GL.glUniform2f(self._uniform_fenetre_taille, longueur, largeur)
+        GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)
+        GL.glUseProgram(0)
+
         imgui.new_frame()
         self.scene.longueur, self.scene.largeur = longueur, largeur
         x, y = glfw.get_cursor_pos(self.fenetre)
@@ -133,7 +217,7 @@ class Ecran:
         self.scene.clic = (
             glfw.get_mouse_button(self.fenetre, glfw.MOUSE_BUTTON_LEFT) == glfw.PRESS
         )
-        self.scene.rendre(glfw.get_time())
+        self.scene.rendre(t)
 
         imgui.set_next_window_position(0, 0)
         imgui.begin(

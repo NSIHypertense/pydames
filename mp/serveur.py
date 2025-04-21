@@ -8,15 +8,16 @@ import threading
 import traceback
 
 from ormsgpack import MsgpackDecodeError
-import mysql.connector
+from mysql.connector import Error as ConnectorError
 
 from . import Paquet, PaquetClientType, PaquetServeurType
-from logic.damier import DAMIER_LARGEUR, DAMIER_LONGUEUR, Pion, Damier
+from logic.damier import Pion, Damier
 from util import configuration
 import bdd
 
 _serv = None
 _thread = None
+_lock = threading.Lock()
 
 _base = None
 _clients = {}
@@ -49,10 +50,12 @@ class Statistiques:
         self.__dames += 1
 
 
-class Jeu:
-    def __init__(self, code: str | None = None):
+class Salon:
+    def __init__(
+        self, code: str | None = None, taille_damier: tuple[int, int] | None = None
+    ):
         while not code or any(s for s in _salons if s.code == code):
-            code = f"{random.randint(0, 9999):03}"
+            code = f"{random.randint(0, 9999):04}"
 
         (
             self.__code,
@@ -67,7 +70,7 @@ class Jeu:
         )
         self.clients = []
         self.id = _base.ajouter_jeu() if _base else None
-        self.partie = Partie(self.id)
+        self.partie = Partie(self.id, taille_damier)
 
     @property
     def code(self):
@@ -119,9 +122,9 @@ class Jeu:
 
 
 class Partie:
-    def __init__(self, id_jeu: int):
+    def __init__(self, id_jeu: int, taille_damier: tuple[int, int] | None = None):
         self.__id_jeu = id_jeu
-        self.damier = Damier(DAMIER_LONGUEUR, DAMIER_LARGEUR)
+        self.damier = Damier(*(taille_damier or (8, 8)))
         self.__id_noir = self.__id_blanc = self.__debut = self.__fin = (
             self.stat_noir
         ) = self.stat_blanc = None
@@ -200,7 +203,12 @@ class Partie:
 
 class DonneesClient:
     def __init__(self):
-        self.etat_pret, self.pseudo, self.file_paquets = False, None, []
+        self.etat_pret, self.pseudo, self.taille_damier, self.file_paquets = (
+            False,
+            None,
+            None,
+            [],
+        )
 
 
 class Gestionnaire(socketserver.BaseRequestHandler):
@@ -218,235 +226,287 @@ class Gestionnaire(socketserver.BaseRequestHandler):
     def envoyer(self, paquet: Paquet):
         _envoyer(self.request, paquet)
 
-    def mettre_pret(self):
-        global _clients
-
-        _clients[self.request].etat_pret = True
-
     def handle(self):
         global _clients
 
         salon = None
         n_client = None
 
-        # n_client = len(_clients) - 1
-        #
-        # if n_client >= 2:
-        #     self.erreur("trop de clients !")
-        #     return
-
-        self.envoyer(_paquet_handshake())
-
-        while True:
-            r, w, _ = select.select([self.request], [self.request], [])
-
-            if w:  # ecrire
-                file = _clients[self.request].file_paquets
-                if file:
-                    octets = file.pop(0)
-                    self.request.sendall(octets)
-                    continue
-
-            if not r:  # lire
-                continue
-
-            parties = []
-            octets = self.request.recv(4)
-
-            if not octets:
-                self.erreur("la connexion a été fermée")
-                break
-
-            if len(octets) < 4:
-                self.erreur("paquet mal formé, header taille invalide")
-                break
-
-            taille_paquet = int.from_bytes(octets[:4], byteorder="little", signed=False)
+        try:
+            self.envoyer(_paquet_handshake())
 
             while True:
-                total = sum([len(x) for x in parties])
-                if total >= taille_paquet:
+                r, w, _ = select.select([self.request], [self.request], [])
+
+                if w:  # ecrire
+                    file = _clients[self.request].file_paquets
+                    if file:
+                        octets = file.pop(0)
+                        self.request.sendall(octets)
+                        continue
+
+                if not r:  # lire
+                    continue
+
+                parties = []
+                octets = self.request.recv(4)
+
+                if not octets:
+                    self.erreur("la connexion a été fermée")
                     break
 
-                parties.append(self.request.recv(taille_paquet - total))
+                if len(octets) < 4:
+                    self.erreur("paquet mal formé, header taille invalide")
+                    break
 
-            octets = b"".join(parties)
+                taille_paquet = int.from_bytes(
+                    octets[:4], byteorder="little", signed=False
+                )
 
-            try:
-                paquet = Paquet.deserialiser(octets)
-            except MsgpackDecodeError:
-                self.erreur("paquet mal formé, erreur msgpack")
-                break
-            except ValueError as e:
-                self.erreur(e)
-                break
+                while True:
+                    total = sum([len(x) for x in parties])
+                    if total >= taille_paquet:
+                        break
 
-            # print(f"({self.client_address[0]}) reçu paquet: {paquet.x}")
+                    parties.append(self.request.recv(taille_paquet - total))
 
-            try:
-                match paquet.type():
-                    case PaquetClientType.HANDSHAKE.value:
-                        if _clients.get(self.request).pseudo:
-                            self.erreur("La connexion a déjà été établie !")
-                        else:
-                            pseudo = paquet.x[1]
+                octets = b"".join(parties)
 
-                            if not isinstance(pseudo, str) or not (
-                                3 <= len(pseudo) <= 24
-                            ):
-                                self.erreur("pseudonyme invalide")
-                                break
+                try:
+                    paquet = Paquet.deserialiser(octets)
+                except MsgpackDecodeError:
+                    self.erreur("paquet mal formé, erreur msgpack")
+                    break
+                except ValueError as e:
+                    self.erreur(e)
+                    break
 
-                            if pseudo in [d.pseudo for d in _clients.values()]:
-                                self.erreur("pseudonyme déjà pris")
-                                break
+                # print(f"({self.client_address[0]}) reçu paquet: {paquet.x}")
 
-                            _clients[self.request].pseudo = pseudo
-                            print(
-                                f"({self.client_address[0]}) connecté en tant que '{pseudo}'"
-                            )
-                    case PaquetClientType.SALON.value:
-                        code = paquet.x[1]
-
-                        if code and (
-                            not isinstance(code, str) or not (4 <= len(code) <= 32)
-                        ):
-                            self.erreur("code du salon invalide")
-                            break
-
-                        if not code or not (
-                            salon := next((j for j in _salons if j.code == code), None)
-                        ):
-                            salon = Jeu(code)
-                            _salons.append(salon)
-
-                        if len(salon.clients) >= 2:
-                            self.erreur("salon déjà rempli")
-                            break
-
-                        salon.clients.append(self.request)
-                        n_client = len(salon.clients) - 1
-
-                        if n_client == 0:
-                            self.envoyer(_paquet_tour())
-                        self.envoyer(_paquet_couleur(_couleur_client(n_client)))
-                        self.envoyer(_paquet_salon(salon.code))
-                    case PaquetClientType.PRET.value:
-                        if salon.partie.debut and not salon.partie.fin:
+                try:
+                    if paquet.type() in (
+                        PaquetClientType.PRET.value,
+                        PaquetClientType.DEPLACER.value,
+                        PaquetClientType.ANNULER.value,
+                    ):
+                        if not salon or self.request not in salon.clients:
                             self.erreur(
-                                f"[{salon.code}] La partie est déjà commencée !"
+                                "Le client n'a pas été trouvé dans le bon salon !"
                             )
-                        else:
-                            self.mettre_pret()
-                            print(
-                                f"[{salon.code}] ({self.client_address[0]}) {pseudo} : prêt"
-                            )
+                            break
 
-                            if len(salon.clients) == 2:
-                                tous_prets = all(
-                                    _clients[c].etat_pret for c in salon.clients
+                    match paquet.type():
+                        case PaquetClientType.HANDSHAKE.value:
+                            if _clients.get(self.request).pseudo:
+                                self.erreur("La connexion a déjà été établie !")
+                            else:
+                                pseudo = paquet.x[1]
+                                taille_damier = paquet.x[2]
+                                assert taille_damier is None or isinstance(
+                                    taille_damier, int
+                                )
+                                taille_damier = (
+                                    (taille_damier,) * 2 if taille_damier else (8, 8)
                                 )
 
-                                if tous_prets:
-                                    salon.affecter_sockets()
-                                    noir, blanc = salon.sock_noir, salon.sock_blanc
+                                if not isinstance(pseudo, str) or not (
+                                    3 <= len(pseudo) <= 24
+                                ):
+                                    self.erreur("pseudonyme invalide")
+                                    break
 
-                                    salon.partie.demarrer(
-                                        _clients[noir].pseudo, _clients[blanc].pseudo
+                                if pseudo in [d.pseudo for d in _clients.values()]:
+                                    self.erreur("pseudonyme déjà pris")
+                                    break
+
+                                _clients[self.request].pseudo = pseudo
+                                _clients[self.request].taille_damier = taille_damier
+
+                                print(
+                                    f"({self.client_address[0]}) connecté en tant que '{pseudo}'"
+                                )
+                        case PaquetClientType.SALON.value:
+                            code = paquet.x[1]
+
+                            if code and (
+                                not isinstance(code, str) or not (4 <= len(code) <= 32)
+                            ):
+                                self.erreur("code du salon invalide")
+                                break
+
+                            if not code or not (
+                                salon := next(
+                                    (j for j in _salons if j.code == code), None
+                                )
+                            ):
+                                salon = Salon(
+                                    code, _clients[self.request].taille_damier
+                                )
+                                _salons.append(salon)
+
+                            if len(salon.clients) >= 2:
+                                self.erreur("salon déjà rempli")
+                                break
+
+                            salon.clients.append(self.request)
+                            n_client = len(salon.clients) - 1
+
+                            if n_client == 0:
+                                self.envoyer(_paquet_tour())
+                            self.envoyer(_paquet_couleur(_couleur_client(n_client)))
+                            self.envoyer(_paquet_salon(salon.code))
+                        case PaquetClientType.PRET.value:
+                            if salon.partie.debut and not salon.partie.fin:
+                                self.erreur(
+                                    f"[{salon.code}] La partie est déjà commencée !"
+                                )
+                            else:
+                                _clients[self.request].etat_pret = True
+                                print(
+                                    f"[{salon.code}] ({self.client_address[0]}) {pseudo} : prêt"
+                                )
+
+                                if len(salon.clients) == 2:
+                                    tous_prets = all(
+                                        _clients[c].etat_pret for c in salon.clients
+                                    )
+
+                                    if tous_prets:
+                                        salon.affecter_sockets()
+                                        noir, blanc = salon.sock_noir, salon.sock_blanc
+
+                                        salon.partie.demarrer(
+                                            _clients[noir].pseudo,
+                                            _clients[blanc].pseudo,
+                                        )
+                                        _diffuser(
+                                            salon,
+                                            _paquet_lancement(salon.partie.damier),
+                                        )
+                                        print(f"[{salon.code}] Partie lancée")
+                        case PaquetClientType.DEPLACER.value:
+                            if salon.partie.fin:
+                                self.erreur(
+                                    f"[{salon.code}] La partie est déjà finie !"
+                                )
+                            else:
+                                source, cible = tuple(paquet.x[1]), tuple(paquet.x[2])
+
+                                if cible in salon.partie.damier.trouver_cases_possibles(
+                                    *source
+                                ):
+                                    pion_source = salon.partie.damier.obtenir_pion(
+                                        *source
+                                    )
+                                    assert pion_source
+
+                                    sauts = salon.partie.damier.deplacer_pion(
+                                        source, cible
                                     )
                                     _diffuser(
-                                        salon, _paquet_lancement(salon.partie.damier)
-                                    )
-                                    print(f"[{salon.code}] Partie lancée")
-                    case PaquetClientType.DEPLACER.value:
-                        if salon.partie.fin:
-                            self.erreur(f"[{salon.code}] La partie est déjà finie !")
-                        else:
-                            source, cible = tuple(paquet.x[1]), tuple(paquet.x[2])
-
-                            if cible in salon.partie.damier.trouver_cases_possibles(
-                                *source
-                            ):
-                                sauts = salon.partie.damier.deplacer_pion(source, cible)
-                                _diffuser(salon, _paquet_deplacements([source, cible]))
-                                salon.statistiques(self.request).sauter(len(sauts))
-
-                                if gagnant := salon.partie.damier.gagnant():
-                                    salon.partie.arreter()
-                                    _diffuser(salon, _paquet_conclusion(gagnant))
-                                    print(f"[{salon.code}] Partie terminée : {gagnant}")
-                                elif salon.partie.damier.est_bloque():
-                                    salon.partie.arreter()
-                                    _diffuser(salon, _paquet_conclusion(None))
-                                    print(
-                                        f"[{salon.code}] Partie terminée : aucun gagnant"
-                                    )
-                                else:
-                                    # redonner au joueur encore un tour s'il peut sauter par dessus des pions adverses
-                                    encore = False
-
-                                    if sauts:
-                                        for c in (
-                                            salon.partie.damier.trouver_cases_possibles(
-                                                *cible
-                                            )
-                                        ):
-                                            if encore := bool(
-                                                salon.partie.damier.deplacer_pion(
-                                                    cible, c, False
-                                                )
-                                            ):
-                                                break
-
-                                    adversaire = next(
-                                        (c for c in salon.clients if c != self.request),
-                                        None,
+                                        salon, _paquet_deplacements([source, cible])
                                     )
 
-                                    if encore:
-                                        self.envoyer(_paquet_tour(cible))
-                                    elif not adversaire:
-                                        self.envoyer(_paquet_tour())
+                                    stat = salon.statistiques(self.request)
+                                    pion_cible = salon.partie.damier.obtenir_pion(
+                                        *cible
+                                    )
+                                    assert stat and pion_cible
+
+                                    stat.sauter(len(sauts))
+                                    if (
+                                        not pion_source.est_dame()
+                                        and pion_cible.est_dame()
+                                    ):
+                                        stat.dame()
+
+                                    if gagnant := salon.partie.damier.gagnant():
+                                        salon.partie.arreter()
+                                        _diffuser(salon, _paquet_conclusion(gagnant))
+                                        print(
+                                            f"[{salon.code}] Partie terminée : {gagnant}"
+                                        )
+                                    elif salon.partie.damier.est_bloque():
+                                        salon.partie.arreter()
+                                        _diffuser(salon, _paquet_conclusion(None))
+                                        print(
+                                            f"[{salon.code}] Partie terminée : aucun gagnant"
+                                        )
                                     else:
-                                        _envoyer(adversaire, _paquet_tour())
-                            else:
-                                self.erreur(
-                                    f"[{salon.code}] déplacement illégal : {source} -> {cible}"
-                                )
-                    case PaquetClientType.ANNULER.value:
-                        adversaire = next(
-                            (c for c in salon.clients if c != self.request),
-                            None,
-                        )
+                                        # redonner au joueur encore un tour s'il peut sauter par dessus des pions adverses
+                                        encore = False
 
-                        if adversaire:
-                            _envoyer(adversaire, _paquet_tour())
-                        else:
-                            self.erreur(f"[{salon.code}] aucun adversaire trouvé !")
-                    case _:
-                        self.erreur(f"paquet de type inconnu ({paquet.type()})")
-                        break
-            except (IndexError, KeyError):
-                self.erreur(f"paquet mal formé ou inattendu ({paquet})")
-                print(traceback.format_exc())
-                break
+                                        if sauts:
+                                            for c in salon.partie.damier.trouver_cases_possibles(
+                                                *cible
+                                            ):
+                                                if encore := bool(
+                                                    salon.partie.damier.deplacer_pion(
+                                                        cible, c, False
+                                                    )
+                                                ):
+                                                    break
+
+                                        adversaire = next(
+                                            (
+                                                c
+                                                for c in salon.clients
+                                                if c != self.request
+                                            ),
+                                            None,
+                                        )
+
+                                        if encore:
+                                            self.envoyer(_paquet_tour(cible))
+                                        elif not adversaire:
+                                            self.envoyer(_paquet_tour())
+                                        else:
+                                            _envoyer(adversaire, _paquet_tour())
+                                else:
+                                    self.erreur(
+                                        f"[{salon.code}] déplacement illégal : {source} -> {cible}"
+                                    )
+                        case PaquetClientType.ANNULER.value:
+                            adversaire = next(
+                                (c for c in salon.clients if c != self.request),
+                                None,
+                            )
+
+                            if adversaire:
+                                _envoyer(adversaire, _paquet_tour())
+                            else:
+                                self.erreur(f"[{salon.code}] aucun adversaire trouvé !")
+                        case _:
+                            self.erreur(f"paquet de type inconnu ({paquet.type()})")
+                            break
+                except (IndexError, KeyError):
+                    self.erreur(f"paquet mal formé ou inattendu ({paquet})")
+                    print(traceback.format_exc())
+                    break
+        except Exception:
+            print(traceback.format_exc())
+            arreter(True)
 
     def finish(self):
         global _clients
 
-        if _clients:
-            salon = next((s for s in _salons if self.request in s.clients), None)
+        try:
+            if _clients:
+                salon = next((s for s in _salons if self.request in s.clients), None)
 
-            if salon:
-                salon.partie.arreter()
-                salon.clients.remove(self.request)
+                if salon:
+                    salon.partie.arreter()
+                    salon.clients.remove(self.request)
 
-            _clients.pop(self.request, None)
-            for donnees in _clients.values():
-                donnees.etat_pret = False
+                _clients.pop(self.request, None)
+                for donnees in _clients.values():
+                    donnees.etat_pret = False
 
-            if salon:
-                _diffuser(salon, _paquet_attente())
+                if salon:
+                    _diffuser(salon, _paquet_attente())
+        except Exception as e:
+            print(traceback.format_exc())
+            arreter(e)
 
 
 def _construire_paquet(paquet: Paquet) -> bytes:
@@ -500,7 +560,7 @@ def _envoyer(client, paquet: Paquet):
     _clients[client].file_paquets.append(octets)
 
 
-def _diffuser(salon: Jeu, paquet: Paquet):
+def _diffuser(salon: Salon, paquet: Paquet):
     octets = _construire_paquet(paquet)
     for client in salon.clients:
         donnees = _clients[client]
@@ -511,10 +571,8 @@ def _couleur_client(n: int) -> Pion:
     return Pion(1 + n % 2)
 
 
-def demarrer(destination: str, port: int):
+def _demarrer_bdd():
     global _base
-    global _serv
-    global _thread
 
     try:
         _base = bdd.Base(
@@ -523,38 +581,72 @@ def demarrer(destination: str, port: int):
             configuration.mysql["mdp"],
             configuration.mysql["base"],
         )
-    except mysql.connector.Error as e:
+    except ConnectorError as e:
         print(e)
         print("Le serveur sera démarré sans base de données.")
 
-    socketserver.ThreadingTCPServer.allow_reuse_address = True
-    _serv = socketserver.ThreadingTCPServer((destination, port), Gestionnaire)
 
-    _thread = threading.Thread(target=_serv.serve_forever)
-    _thread.start()
-
-
-def arreter():
-    global _base
+def demarrer(destination: str, port: int):
     global _serv
     global _thread
 
-    if _serv:
-        print("arrêt du serveur...")
+    def servir():
+        _serv.serve_forever()
+        arreter()
+
+    with _lock:
+        socketserver.ThreadingTCPServer.allow_reuse_address = True
+
+        _demarrer_bdd()
+
+        _serv = socketserver.ThreadingTCPServer((destination, port), Gestionnaire)
+
+        _thread = threading.Thread(target=servir)
+        _thread.start()
+
+
+def arreter(e: Exception | None = None):
+    global _base
+    global _serv
+    global _thread
+    global _clients
+    global _salons
+
+    with _lock:
         try:
-            _serv.shutdown()
-        except OSError:
+            raise e
+        except ConnectorError:
+            if configuration.auto_redemarrage:
+                if _base:
+                    _base.arreter()
+                print("\nRedémarrage de la BDD...\n")
+                _demarrer_bdd()
+                return
+        except Exception:
             pass
-        _serv.server_close()
-        _serv = None
 
-    if _thread:
-        _thread.join()
-        _thread = None
+        if _serv:
+            print("arrêt du serveur...")
+            try:
+                _serv.shutdown()
+            except OSError:
+                pass
+            _serv.server_close()
+            _serv = None
 
-    if _base:
-        _base.arreter()
-        _base = None
+        if _thread:
+            _thread = None
+
+        if _base:
+            _base.arreter()
+            _base = None
+
+        _clients.clear()
+        _salons.clear()
+
+    if e and configuration.auto_redemarrage:
+        print("\nRedémarrage...\n")
+        demarrer(configuration.socket["adresse"], configuration.socket["port"])
 
 
 class Console(cmd.Cmd):

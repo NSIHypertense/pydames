@@ -7,7 +7,7 @@ import numpy as np
 from OpenGL import GL
 import imgui
 
-from logic.damier import Pion, DAMIER_LARGEUR, DAMIER_LONGUEUR
+from logic.damier import Pion
 import mp.client
 import util
 
@@ -29,16 +29,14 @@ def verifier_programme(program):
 def creer_programme_shader(vert: str, frag: str):
     vertex_shader = GL.glCreateShader(GL.GL_VERTEX_SHADER)
 
-    with util.resource(vert) as f:
-        GL.glShaderSource(vertex_shader, f.read())
+    GL.glShaderSource(vertex_shader, util.traiter_glsl(util.resource_chemin(vert)))
 
     GL.glCompileShader(vertex_shader)
     verifier_shader(vertex_shader)
 
     fragment_shader = GL.glCreateShader(GL.GL_FRAGMENT_SHADER)
 
-    with util.resource(frag) as f:
-        GL.glShaderSource(fragment_shader, f.read())
+    GL.glShaderSource(fragment_shader, util.traiter_glsl(util.resource_chemin(frag)))
 
     GL.glCompileShader(fragment_shader)
     verifier_shader(fragment_shader)
@@ -273,6 +271,13 @@ class SceneTitre(Scene):
                 else:
                     imgui.text("Le pseudonyme doit comporter entre 3 et 24 caractères.")
 
+                _, damier_taille = imgui.input_int(
+                    "Taille du damier", mp.client.damier_taille, step=1
+                )
+
+                if 4 <= damier_taille <= 32:
+                    mp.client.damier_taille = damier_taille
+
                 if imgui.button("Retour"):
                     self.popup_reglages = False
                     imgui.close_current_popup()
@@ -326,11 +331,13 @@ class SceneSalons(Scene):
         else:
             self.code_salon = code_salon
 
+        texte_confirmer = "Confirmer" if self.code_salon else "Créer"
+
         imgui.dummy(1, 10)
 
         longueur = (
             max(
-                imgui.calc_text_size("Confirmer")[0],
+                imgui.calc_text_size(texte_confirmer)[0],
                 imgui.calc_text_size("Déconnecter")[0],
             )
             + 20
@@ -338,7 +345,7 @@ class SceneSalons(Scene):
 
         imgui.set_cursor_pos_x((longueur_popup - (2 * longueur + 20)) / 2)
 
-        if imgui.button("Confirmer", longueur, 30 * echelle):
+        if imgui.button(texte_confirmer, longueur, 30 * echelle):
             mp.client.envoyer(mp.client.paquet_salon(self.code_salon))
             self.prochaine_scene = SceneAttente()
 
@@ -375,7 +382,7 @@ class SceneAttente(Scene):
         largeur_fenetre = io.display_size.y
 
         longueur_popup = max(longueur_fenetre // 2, 400)
-        largeur_popup = max(largeur_fenetre // 4, 180)
+        largeur_popup = max(largeur_fenetre // 4, 190)
 
         imgui.set_next_window_size(longueur_popup, largeur_popup)
         imgui.set_next_window_position(
@@ -462,8 +469,17 @@ class SceneAttente(Scene):
 
 class SceneDamier(Scene):
     class _GLDamier:
-        def __init__(self, damier_overlay: bool = False):
-            self.damier_overlay = damier_overlay
+        def __init__(
+            self,
+            damier_longueur: int,
+            damier_largeur: int,
+            damier_overlay: bool = False,
+        ):
+            self.longueur, self.largeur, self.damier_overlay = (
+                damier_longueur,
+                damier_largeur,
+                damier_overlay,
+            )
 
             self.programme = creer_programme_shader(
                 "shader/damier_vert.glsl", "shader/damier_frag.glsl"
@@ -480,7 +496,6 @@ class SceneDamier(Scene):
             )
 
             GL.glUseProgram(self.programme)
-            GL.glUniform2f(self.uniform_damier_taille, DAMIER_LONGUEUR, DAMIER_LARGEUR)
             GL.glUseProgram(0)
 
             sommets, couleurs = self.generer_buffers([])
@@ -516,26 +531,26 @@ class SceneDamier(Scene):
             GL.glBindVertexArray(0)
 
         def generer_buffers(
-            self, cases_possibles: list[tuple[int, int]]
+            self,
+            cases_possibles: list[tuple[int, int]],
         ) -> tuple[list[float], list[float]]:
             sommets = []
             couleurs = []
-            mx = 2 / DAMIER_LONGUEUR
-            my = 2 / DAMIER_LARGEUR
+            m = (2 / self.longueur, 2 / self.largeur)
 
-            for y in range(DAMIER_LARGEUR):
-                for x in range(DAMIER_LONGUEUR):
+            for y in range(self.largeur):
+                for x in range(self.longueur):
                     if not self.damier_overlay or (x, y) in cases_possibles:
-                        x0 = x * mx - 1
-                        y0 = (DAMIER_LARGEUR - 1 - y) * my - 1
-                        x1 = x0 + mx
-                        y1 = y0 + my
+                        x0 = x * m[0] - 1
+                        y0 = (self.largeur - 1 - y) * m[1] - 1
+                        x1 = x0 + m[0]
+                        y1 = y0 + m[1]
 
                         sommets.extend([x0, y0, 0, x1, y0, 0, x0, y1, 0])
                         sommets.extend([x1, y0, 0, x1, y1, 0, x0, y1, 0])
 
                         if self.damier_overlay:
-                            couleur = [1, 0, 1, 0]
+                            couleur = [0, 0, 1, 0]
                         else:
                             couleur = (
                                 [1 - 1 / 12, 1 - 1 / 12, 1 - 1 / 16, 1]
@@ -569,11 +584,12 @@ class SceneDamier(Scene):
             GL.glUniform1f(self.uniform_t, t)
             GL.glUniform2f(self.uniform_fenetre_taille, *taille)
             GL.glUniform2f(self.uniform_fenetre_position, *position)
+            GL.glUniform2f(self.uniform_damier_taille, self.longueur, self.largeur)
 
             GL.glEnable(GL.GL_BLEND)
             GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
             GL.glBindVertexArray(self.vao)
-            GL.glDrawArrays(GL.GL_TRIANGLES, 0, DAMIER_LONGUEUR * DAMIER_LARGEUR * 6)
+            GL.glDrawArrays(GL.GL_TRIANGLES, 0, self.longueur * self.largeur * 6)
             GL.glBindVertexArray(0)
             GL.glDisable(GL.GL_BLEND)
 
@@ -598,8 +614,15 @@ class SceneDamier(Scene):
             )
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
 
-        def __init__(self, x: int, y: int, type: Pion):
-            self.position, self.type, self.dame = (x, y), type, False
+        def __init__(
+            self, gl_damier: "SceneDamier._GLDamier", x: int, y: int, type: Pion
+        ):
+            self._gl_damier, self.position, self.type, self.dame = (
+                gl_damier,
+                (x, y),
+                type,
+                False,
+            )
 
             self.programme = creer_programme_shader(
                 "shader/pion_vert.glsl", "shader/pion_frag.glsl"
@@ -628,7 +651,6 @@ class SceneDamier(Scene):
             )
 
             GL.glUseProgram(self.programme)
-            GL.glUniform2f(self.uniform_damier_taille, DAMIER_LONGUEUR, DAMIER_LARGEUR)
             GL.glUseProgram(0)
 
             if not SceneDamier._GLPion.buffer_sommets:
@@ -647,6 +669,11 @@ class SceneDamier(Scene):
             GL.glUniform1f(self.uniform_t, t)
             GL.glUniform2f(self.uniform_fenetre_taille, *taille)
             GL.glUniform2f(self.uniform_fenetre_position, *position)
+            GL.glUniform2f(
+                self.uniform_damier_taille,
+                self._gl_damier.longueur,
+                self._gl_damier.largeur,
+            )
             GL.glUniform2f(self.uniform_pion_position, *self.position)
             GL.glUniform1i(self.uniform_pion_couleur, self.type.couleur().value)
             GL.glUniform1i(self.uniform_pion_selection, selection)
@@ -672,8 +699,8 @@ class SceneDamier(Scene):
     def __init__(self):
         self.__cases_possibles = []
 
-        self.damier = SceneDamier._GLDamier()
-        self.overlay = SceneDamier._GLDamier(True)
+        self.damier = SceneDamier._GLDamier(8, 8)
+        self.overlay = SceneDamier._GLDamier(8, 8, True)
         self.pions = []
         self.clic_avant = False
         self.appui = False
@@ -692,6 +719,20 @@ class SceneDamier(Scene):
 
         self.appui = not self.clic and self.clic_avant and mp.client.tour
         self.clic_avant = self.clic
+
+        if (
+            mp.client.damier
+            and mp.client.damier.longueur != self.damier.longueur
+            and mp.client.damier.largeur != self.damier.largeur
+        ):
+            taille_damier = (
+                mp.client.damier.longueur,
+                mp.client.damier.largeur,
+            )
+            self.damier.longueur, self.damier.largeur = taille_damier
+            self.overlay.longueur, self.overlay.largeur = taille_damier
+            self.damier.set_cases([])
+            self.overlay.set_cases(self.__cases_possibles)
 
         while mp.client.deplacements:
             self.__cases_possibles = []
@@ -722,7 +763,7 @@ class SceneDamier(Scene):
                 for y in range(mp.client.damier.largeur):
                     c = m[x][y]
                     if c:
-                        self.pions.append(SceneDamier._GLPion(x, y, c))
+                        self.pions.append(SceneDamier._GLPion(self.damier, x, y, c))
 
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
@@ -747,14 +788,18 @@ class SceneDamier(Scene):
             self.overlay.set_cases(self.__cases_possibles)
 
         damier_curseur = (
-            (self.curseur[0] - rendu_position[0]) * DAMIER_LONGUEUR // rendu_taille[0],
-            (self.curseur[1] - rendu_position[1]) * DAMIER_LARGEUR // rendu_taille[1],
+            (self.curseur[0] - rendu_position[0])
+            * self.damier.longueur
+            // rendu_taille[0],
+            (self.curseur[1] - rendu_position[1])
+            * self.damier.largeur
+            // rendu_taille[1],
         )
 
         selection_est_pion = (
             bool(mp.client.damier)
-            and 0 <= damier_curseur[0] < DAMIER_LONGUEUR
-            and 0 <= damier_curseur[1] < DAMIER_LARGEUR
+            and 0 <= damier_curseur[0] < mp.client.damier.longueur
+            and 0 <= damier_curseur[1] < mp.client.damier.largeur
             and mp.client.damier.obtenir_pion(*damier_curseur)
         )
 

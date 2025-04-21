@@ -11,6 +11,7 @@ from . import Paquet, PaquetClientType, PaquetServeurType
 
 # Joueur
 pseudo = f"Joueur{random.randint(0, 999):03}"
+damier_taille = 8
 
 # Connexion
 connexion_succes = False
@@ -32,8 +33,8 @@ sauts = []
 selection = None
 
 
-def paquet_handshake(pseudo: str) -> Paquet:
-    return Paquet([PaquetClientType.HANDSHAKE, pseudo])
+def paquet_handshake() -> Paquet:
+    return Paquet([PaquetClientType.HANDSHAKE, pseudo, damier_taille])
 
 
 def paquet_salon(code: str) -> Paquet:
@@ -117,7 +118,7 @@ def thread_client():
         try:
             match paquet.type():
                 case PaquetServeurType.HANDSHAKE.value:
-                    envoyer(paquet_handshake(pseudo))
+                    envoyer(paquet_handshake())
                     print("Connexion au serveur pydames établie")
                     connexion_succes = True
                 case PaquetServeurType.ERREUR.value:
@@ -210,8 +211,11 @@ def arreter():
 
         if sock:
             print("arrêt du client...")
-            sock.shutdown(socket.SHUT_RDWR)
-            sock.close()
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+                sock.close()
+            except OSError:
+                pass
             sock = None
 
     if thread:
