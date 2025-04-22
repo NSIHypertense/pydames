@@ -499,6 +499,9 @@ class SceneDamier(Scene):
             self.uniform_damier_taille = GL.glGetUniformLocation(
                 self.programme, "damier_taille"
             )
+            self.uniform_damier_curseur = GL.glGetUniformLocation(
+                self.programme, "damier_curseur"
+            )
 
             GL.glUseProgram(self.programme)
             GL.glUseProgram(0)
@@ -564,8 +567,11 @@ class SceneDamier(Scene):
                         x1 = x0 + m[0]
                         y1 = y0 + m[1]
 
-                        sommets.extend([x0, y0, 0, x1, y0, 0, x0, y1, 0])
-                        sommets.extend([x1, y0, 0, x1, y1, 0, x0, y1, 0])
+                        _sommets = [x0, y0, 0, x1, y0, 0, x0, y1, 0]
+                        _sommets.extend([x1, y0, 0, x1, y1, 0, x0, y1, 0])
+                        if self.inverser:
+                            _sommets = [-s for s in _sommets]
+                        sommets.extend(_sommets)
 
                         if self.damier_overlay:
                             couleur = [0, valeur_d, int(cond_p), 0]
@@ -577,9 +583,6 @@ class SceneDamier(Scene):
                             )
 
                         couleurs.extend(couleur * 6)
-
-            if self.inverser:
-                sommets = [-s for s in sommets]
 
             return sommets, couleurs
 
@@ -606,12 +609,16 @@ class SceneDamier(Scene):
 
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
 
-        def rendre(self, t, position, taille):
+        def rendre(self, t, position, taille, curseur: tuple[int, int] | None = None):
+            if not curseur:
+                curseur = (-1, -1)
+
             GL.glUseProgram(self.programme)
             GL.glUniform1f(self.uniform_t, t)
             GL.glUniform2f(self.uniform_fenetre_taille, *taille)
             GL.glUniform2f(self.uniform_fenetre_position, *position)
             GL.glUniform2f(self.uniform_damier_taille, self.longueur, self.largeur)
+            GL.glUniform2f(self.uniform_damier_curseur, *curseur)
 
             GL.glEnable(GL.GL_BLEND)
             GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
@@ -909,6 +916,22 @@ class SceneDamier(Scene):
         io = imgui.get_io()
         echelle = io.font_global_scale
 
+        rendu_taille = min(self.longueur, self.largeur)
+        rendu_position = (
+            (self.longueur - rendu_taille) // 2,
+            (self.largeur - rendu_taille) // 2,
+        )
+        rendu_taille = (rendu_taille, rendu_taille)
+
+        damier_curseur = (
+            (self.curseur[0] - rendu_position[0])
+            * self.damier.longueur
+            // rendu_taille[0],
+            (self.curseur[1] - rendu_position[1])
+            * self.damier.largeur
+            // rendu_taille[1],
+        )
+
         inverser = mp.client.couleur == Pion.BLANC
         if self.damier.inverser != inverser:
             self.damier.inverser, self.overlay.inverser = inverser, inverser
@@ -976,15 +999,11 @@ class SceneDamier(Scene):
 
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
-        rendu_taille = min(self.longueur, self.largeur)
-        rendu_position = (
-            (self.longueur - rendu_taille) // 2,
-            (self.largeur - rendu_taille) // 2,
-        )
-        rendu_taille = (rendu_taille, rendu_taille)
         GL.glViewport(*rendu_position, *rendu_taille)
 
-        self.damier.rendre(t, rendu_position, rendu_taille)
+        self.damier.rendre(
+            t, rendu_position, rendu_taille, damier_curseur if mp.client.tour else None
+        )
         if mp.client.tour:
             self.overlay.rendre(t, rendu_position, rendu_taille)
 
@@ -997,14 +1016,6 @@ class SceneDamier(Scene):
             ]
             self.overlay.set_cases(self.__cases_possibles, self.__cases_deplacements)
 
-        damier_curseur = (
-            (self.curseur[0] - rendu_position[0])
-            * self.damier.longueur
-            // rendu_taille[0],
-            (self.curseur[1] - rendu_position[1])
-            * self.damier.largeur
-            // rendu_taille[1],
-        )
         if inverser:
             damier_curseur = (
                 self.damier.longueur - damier_curseur[0] - 1,
@@ -1035,7 +1046,8 @@ class SceneDamier(Scene):
                 pion.rendre(t, rendu_position, rendu_taille, False)
             else:
                 selection = (
-                    selection_est_pion
+                    mp.client.tour
+                    and selection_est_pion
                     and pion.type.couleur() == mp.client.couleur
                     and damier_curseur[0] == pion.position[0]
                     and damier_curseur[1] == pion.position[1]
@@ -1047,7 +1059,8 @@ class SceneDamier(Scene):
                         *pion.position
                     )
                     self.overlay.set_cases(
-                        self.__cases_possibles, self.__cases_deplacements
+                        self.__cases_possibles,
+                        self.__cases_deplacements,
                     )
 
                 pion.rendre(t, rendu_position, rendu_taille, selection)

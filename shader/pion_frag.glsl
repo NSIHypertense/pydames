@@ -49,11 +49,11 @@ void main() {
 
     if (pion_dame) {
         for (float i = 0.0; i < 3.0; i++) {
-            vec2 n = rand2(_pion_position);
+            vec2 n = rand2(pion_position);
             vec2 p = vec2(sin(t + i + (n.x + uv.x) * M_PI) + bruit(uv - t / 3.0) * i, cos(t - n.y * M_PI) + bruit(uv + t) * i);
 
             float d = distance_ligne(uv, -p, p);
-            vec3 c = pion_couleur == 1 ? vec3(0.01, 0.01, 0.03) : vec3(-0.007, -0.02, -0.02);
+            vec3 c = pion_couleur == 1 ? vec3(0.003, -0.007, -0.007) : vec3(0.001, 0.002, 0.007);
 
             frag_couleur = clamp(frag_couleur + vec4(c / d, 0.0), 0.0, 1.0);
         }
