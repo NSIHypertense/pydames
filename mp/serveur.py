@@ -220,7 +220,7 @@ class Gestionnaire(socketserver.BaseRequestHandler):
     def erreur(self, *args, **kwargs):
         global _clients
 
-        print(f"({self.client_address[0]}) erreur:", *args, file=sys.stderr, **kwargs)
+        print(f"({self.client_address[0]}) erreur :", *args, file=sys.stderr, **kwargs)
         self.envoyer(_paquet_erreur(" ".join(map(str, args))))
 
     def envoyer(self, paquet: Paquet):
@@ -476,6 +476,19 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                                 _envoyer(adversaire, _paquet_tour())
                             else:
                                 self.erreur(f"[{salon.code}] aucun adversaire trouvé !")
+                        case PaquetClientType.TCHAT.value:
+                            message = paquet.x[1]
+                            pseudo = _clients[self.request].pseudo
+
+                            assert isinstance(message, str)
+                            message = message.strip()
+
+                            if not (1 <= len(message) <= 300):
+                                self.erreur(
+                                    f"[{salon.code}] message de tchat invalide !"
+                                )
+
+                            _diffuser(salon, _paquet_tchat(pseudo, message))
                         case _:
                             self.erreur(f"paquet de type inconnu ({paquet.type()})")
                             break
@@ -553,6 +566,10 @@ def _paquet_modification(position: tuple[int, int], nouveau: Pion) -> Paquet:
 
 def _paquet_tour(position: tuple[int, int] | None = None) -> Paquet:
     return Paquet([PaquetServeurType.TOUR, position])
+
+
+def _paquet_tchat(pseudo: str, message: str) -> Paquet:
+    return Paquet([PaquetServeurType.TCHAT, pseudo, message])
 
 
 def _envoyer(client, paquet: Paquet):

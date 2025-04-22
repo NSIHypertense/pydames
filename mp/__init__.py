@@ -11,6 +11,7 @@ class PaquetClientType(Enum):
     PRET = 3
     DEPLACER = 4
     ANNULER = 5
+    TCHAT = 6
 
 
 class PaquetServeurType(Enum):
@@ -24,6 +25,7 @@ class PaquetServeurType(Enum):
     DEPLACEMENTS = 8
     MODIFICATION = 9
     TOUR = 10
+    TCHAT = 11
 
 
 class Serialisable(ABC):

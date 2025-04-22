@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import math
+import time
 import threading
 import traceback
 
@@ -10,6 +11,8 @@ import imgui
 from logic.damier import Pion
 import mp.client
 import util
+
+_TRANSITION_COEF = 2.0
 
 
 def verifier_shader(shader):
@@ -473,12 +476,14 @@ class SceneDamier(Scene):
             self,
             damier_longueur: int,
             damier_largeur: int,
-            damier_overlay: bool = False,
+            damier_overlay: bool,
+            inverser: bool,
         ):
-            self.longueur, self.largeur, self.damier_overlay = (
+            self.longueur, self.largeur, self.damier_overlay, self.inverser = (
                 damier_longueur,
                 damier_largeur,
                 damier_overlay,
+                inverser,
             )
 
             self.programme = creer_programme_shader(
@@ -498,7 +503,7 @@ class SceneDamier(Scene):
             GL.glUseProgram(self.programme)
             GL.glUseProgram(0)
 
-            sommets, couleurs = self.generer_buffers([])
+            sommets, couleurs = self.generer_buffers([], [])
 
             sommets = np.array(sommets, dtype=np.float32)
             couleurs = np.array(couleurs, dtype=np.float32)
@@ -533,6 +538,7 @@ class SceneDamier(Scene):
         def generer_buffers(
             self,
             cases_possibles: list[tuple[int, int]],
+            cases_deplacements: list[tuple[int, int]],
         ) -> tuple[list[float], list[float]]:
             sommets = []
             couleurs = []
@@ -540,7 +546,19 @@ class SceneDamier(Scene):
 
             for y in range(self.largeur):
                 for x in range(self.longueur):
-                    if not self.damier_overlay or (x, y) in cases_possibles:
+                    cond_p, valeur_d = (
+                        (x, y) in cases_possibles,
+                        cases_deplacements.index((x, y))
+                        if (x, y) in cases_deplacements
+                        else -1,
+                    )
+
+                    if valeur_d != -1:
+                        valeur_d = (
+                            1 if valeur_d in (0, len(cases_deplacements) - 1) else 0.5
+                        )
+
+                    if not self.damier_overlay or cond_p or valeur_d > 0:
                         x0 = x * m[0] - 1
                         y0 = (self.largeur - 1 - y) * m[1] - 1
                         x1 = x0 + m[0]
@@ -550,7 +568,7 @@ class SceneDamier(Scene):
                         sommets.extend([x1, y0, 0, x1, y1, 0, x0, y1, 0])
 
                         if self.damier_overlay:
-                            couleur = [0, 0, 1, 0]
+                            couleur = [0, valeur_d, int(cond_p), 0]
                         else:
                             couleur = (
                                 [1 - 1 / 12, 1 - 1 / 12, 1 - 1 / 16, 1]
@@ -560,10 +578,19 @@ class SceneDamier(Scene):
 
                         couleurs.extend(couleur * 6)
 
+            if self.inverser:
+                sommets = [-s for s in sommets]
+
             return sommets, couleurs
 
-        def set_cases(self, cases_possibles: list[tuple[int, int]]):
-            sommets, couleurs = self.generer_buffers(cases_possibles)
+        def set_cases(
+            self,
+            cases_possibles: list[tuple[int, int]],
+            cases_deplacements: list[tuple[int, int]],
+        ):
+            sommets, couleurs = self.generer_buffers(
+                cases_possibles, cases_deplacements
+            )
 
             couleurs = np.array(couleurs, dtype=np.float32)
             sommets = np.array(sommets, dtype=np.float32)
@@ -615,19 +642,38 @@ class SceneDamier(Scene):
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
 
         def __init__(
-            self, gl_damier: "SceneDamier._GLDamier", x: int, y: int, type: Pion
+            self,
+            gl_damier: "SceneDamier._GLDamier",
+            x: int,
+            y: int,
+            type: Pion,
+            inverser: bool,
         ):
-            self._gl_damier, self.position, self.type, self.dame = (
+            (
+                self._gl_damier,
+                self.t_pre,
+                self.position,
+                self.position_pre,
+                self.position_pre_test,
+                self.type,
+                self.dame,
+                self.inverser,
+            ) = (
                 gl_damier,
+                0.0,
+                (x, y),
+                (x, y),
                 (x, y),
                 type,
                 False,
+                inverser,
             )
 
             self.programme = creer_programme_shader(
                 "shader/pion_vert.glsl", "shader/pion_frag.glsl"
             )
             self.uniform_t = GL.glGetUniformLocation(self.programme, "t")
+            self.uniform_t_pre = GL.glGetUniformLocation(self.programme, "t_pre")
             self.uniform_fenetre_taille = GL.glGetUniformLocation(
                 self.programme, "fenetre_taille"
             )
@@ -640,6 +686,9 @@ class SceneDamier(Scene):
             self.uniform_pion_position = GL.glGetUniformLocation(
                 self.programme, "pion_position"
             )
+            self.uniform_pion_position_pre = GL.glGetUniformLocation(
+                self.programme, "pion_position_pre"
+            )
             self.uniform_pion_couleur = GL.glGetUniformLocation(
                 self.programme, "pion_couleur"
             )
@@ -649,9 +698,6 @@ class SceneDamier(Scene):
             self.uniform_pion_dame = GL.glGetUniformLocation(
                 self.programme, "pion_dame"
             )
-
-            GL.glUseProgram(self.programme)
-            GL.glUseProgram(0)
 
             if not SceneDamier._GLPion.buffer_sommets:
                 SceneDamier._GLPion.creer_buffer_sommets()
@@ -664,9 +710,26 @@ class SceneDamier(Scene):
             GL.glBindVertexArray(0)
 
         def rendre(self, t, position, taille, selection):
+            if self.position != self.position_pre_test:
+                self.position_pre = self.position_pre_test
+                self.position_pre_test = self.position
+                self.t_pre = t + 1.0 / _TRANSITION_COEF
+
+            pion_position, pion_position_pre = self.position, self.position_pre
+            if self.inverser:
+                pion_position = (
+                    self._gl_damier.longueur - pion_position[0] - 1,
+                    self._gl_damier.largeur - pion_position[1] - 1,
+                )
+                pion_position_pre = (
+                    self._gl_damier.longueur - pion_position_pre[0] - 1,
+                    self._gl_damier.largeur - pion_position_pre[1] - 1,
+                )
+
             GL.glUseProgram(self.programme)
 
             GL.glUniform1f(self.uniform_t, t)
+            GL.glUniform1f(self.uniform_t_pre, self.t_pre)
             GL.glUniform2f(self.uniform_fenetre_taille, *taille)
             GL.glUniform2f(self.uniform_fenetre_position, *position)
             GL.glUniform2f(
@@ -674,7 +737,8 @@ class SceneDamier(Scene):
                 self._gl_damier.longueur,
                 self._gl_damier.largeur,
             )
-            GL.glUniform2f(self.uniform_pion_position, *self.position)
+            GL.glUniform2f(self.uniform_pion_position, *pion_position)
+            GL.glUniform2f(self.uniform_pion_position_pre, *pion_position_pre)
             GL.glUniform1i(self.uniform_pion_couleur, self.type.couleur().value)
             GL.glUniform1i(self.uniform_pion_selection, selection)
             GL.glUniform1i(self.uniform_pion_dame, self.type.est_dame())
@@ -690,6 +754,110 @@ class SceneDamier(Scene):
 
             GL.glUseProgram(0)
 
+    class _GLTchat:
+        def __init__(self):
+            self.saisie = ""
+            self.affichage_input = False
+            self.duree_affichage = 10
+            self.longueur = 300
+            self.largeur = 150
+            self.scroll = 0
+
+        def rendre(self, curseur, clic, position):
+            io = imgui.get_io()
+            echelle = io.font_global_scale
+            maintenant = time.time()
+
+            survole = (
+                position[0] <= curseur[0] <= position[0] + self.longueur * echelle
+                and position[1] <= curseur[1] <= position[1] + self.largeur * echelle
+            )
+
+            if imgui.is_key_down(io.key_map[imgui.KEY_ENTER]):
+                self.affichage_input = True
+            elif imgui.is_key_down(io.key_map[imgui.KEY_ESCAPE]) or (
+                clic and not survole
+            ):
+                self.affichage_input = False
+
+            opacite = 1.0 if self.affichage_input else (0.2 if survole else 0.1)
+            flags = (
+                imgui.WINDOW_NO_RESIZE
+                | imgui.WINDOW_NO_MOVE
+                | imgui.WINDOW_NO_COLLAPSE
+                | imgui.WINDOW_NO_SCROLLBAR
+            )
+            if not self.affichage_input:
+                flags |= imgui.WINDOW_NO_TITLE_BAR
+
+            imgui.set_next_window_position(*position)
+            imgui.set_next_window_size(self.longueur * echelle, self.largeur * echelle)
+
+            imgui.push_style_var(imgui.STYLE_ALPHA, opacite)
+            imgui.begin("Tchat", False, flags)
+            imgui.pop_style_var()
+
+            largeur_saisie = 25
+            imgui.set_cursor_pos_y((self.largeur - largeur_saisie) * echelle)
+
+            if self.affichage_input:
+                self.scroll = max(self.scroll + io.mouse_wheel * 8, 0)
+
+                imgui.set_keyboard_focus_here()
+                pressed_enter, self.saisie = imgui.input_text(
+                    "##saisie",
+                    self.saisie,
+                    flags=imgui.INPUT_TEXT_ENTER_RETURNS_TRUE,
+                )
+
+                texte = self.saisie.strip()
+                if pressed_enter and texte and len(texte) <= 300:
+                    mp.client.envoyer(mp.client.paquet_tchat(texte))
+                    self.saisie = ""
+                    self.affichage_input = False
+            else:
+                self.scroll = 0
+                if imgui.invisible_button(
+                    "##tchat_clic", self.longueur, largeur_saisie
+                ):
+                    self.affichage_input = True
+
+            messages = [
+                m
+                for m in mp.client.messages
+                if self.affichage_input or (maintenant - m.t < self.duree_affichage)
+            ]
+            messages = list(reversed(messages))
+
+            y = (self.largeur + self.scroll - 5) * echelle
+            if self.affichage_input:
+                y -= largeur_saisie * echelle
+
+            for message in messages:
+                texte = f"{message.pseudo} : {message.texte}"
+                hauteur_ligne = (
+                    imgui.calc_text_size(
+                        texte, wrap_width=self.longueur * echelle - 10
+                    )[1]
+                    + 2
+                )
+
+                y -= hauteur_ligne
+                if y < 0 or y > self.largeur * echelle - largeur_saisie - 2:
+                    continue
+
+                imgui.set_cursor_pos_y(y)
+                alpha = (
+                    1.0
+                    if self.affichage_input
+                    else max(0.0, 1.0 - (maintenant - message.t) / self.duree_affichage)
+                )
+                imgui.push_style_var(imgui.STYLE_ALPHA, alpha)
+                imgui.text_wrapped(texte)
+                imgui.pop_style_var()
+
+            imgui.end()
+
     prochaine_scene = None
     longueur = None
     largeur = None
@@ -698,13 +866,37 @@ class SceneDamier(Scene):
 
     def __init__(self):
         self.__cases_possibles = []
+        self.__cases_deplacements = []
 
-        self.damier = SceneDamier._GLDamier(8, 8)
-        self.overlay = SceneDamier._GLDamier(8, 8, True)
+        self.damier = SceneDamier._GLDamier(8, 8, False, False)
+        self.overlay = SceneDamier._GLDamier(8, 8, True, False)
         self.pions = []
+        self.tchat = SceneDamier._GLTchat()
         self.clic_avant = False
         self.appui = False
         self.pion_curseur = None
+
+    def __trouver_cases_deplacements(
+        self, a: tuple[int, int], b: tuple[int, int]
+    ) -> list[tuple[int, int]]:
+        cases = self.__cases_deplacements
+
+        if a:
+            cases.append(a)
+
+            if b:
+                xa, ya = a
+                xb, yb = b
+
+                for i in range(1, abs(xa - xb)):
+                    x = xa + (i if (xb - xa) > 0 else -i)
+                    y = ya + (i if (yb - ya) > 0 else -i)
+                    cases.append((x, y))
+
+                cases.append(b)
+
+        cases = list(dict.fromkeys(cases))
+        return cases
 
     def rendre(self, t):
         if not mp.client.sock or mp.client.connexion_erreur:
@@ -716,6 +908,14 @@ class SceneDamier(Scene):
 
         io = imgui.get_io()
         echelle = io.font_global_scale
+
+        inverser = mp.client.couleur == Pion.BLANC
+        if self.damier.inverser != inverser:
+            self.damier.inverser, self.overlay.inverser = inverser, inverser
+            for p in self.pions:
+                p.inverser = inverser
+            self.damier.set_cases([], [])
+            self.overlay.set_cases(self.__cases_possibles, self.__cases_deplacements)
 
         self.appui = not self.clic and self.clic_avant and mp.client.tour
         self.clic_avant = self.clic
@@ -731,22 +931,29 @@ class SceneDamier(Scene):
             )
             self.damier.longueur, self.damier.largeur = taille_damier
             self.overlay.longueur, self.overlay.largeur = taille_damier
-            self.damier.set_cases([])
-            self.overlay.set_cases(self.__cases_possibles)
+            self.damier.set_cases([], [])
+            self.overlay.set_cases(self.__cases_possibles, self.__cases_deplacements)
 
         while mp.client.deplacements:
             self.__cases_possibles = []
-            self.overlay.set_cases([])
+            self.overlay.set_cases(self.__cases_possibles, self.__cases_deplacements)
 
             source, cible = mp.client.deplacements.pop(0), mp.client.deplacements.pop(0)
+
             pion = next((p for p in self.pions if p.position == source), None)
 
             if pion:
                 pion.type = mp.client.damier.obtenir_pion(*cible)
                 assert pion.type
+                if pion.type.couleur() != mp.client.couleur:
+                    self.__cases_deplacements = self.__trouver_cases_deplacements(
+                        source, cible
+                    )
                 pion.position = cible
             else:
                 print("impossible d'effectuer le déplacement !")
+
+            self.overlay.set_cases(self.__cases_possibles, self.__cases_deplacements)
 
         while mp.client.sauts:
             case = mp.client.sauts.pop(0)
@@ -763,7 +970,9 @@ class SceneDamier(Scene):
                 for y in range(mp.client.damier.largeur):
                     c = m[x][y]
                     if c:
-                        self.pions.append(SceneDamier._GLPion(self.damier, x, y, c))
+                        self.pions.append(
+                            SceneDamier._GLPion(self.damier, x, y, c, inverser)
+                        )
 
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
@@ -776,7 +985,8 @@ class SceneDamier(Scene):
         GL.glViewport(*rendu_position, *rendu_taille)
 
         self.damier.rendre(t, rendu_position, rendu_taille)
-        self.overlay.rendre(t, rendu_position, rendu_taille)
+        if mp.client.tour:
+            self.overlay.rendre(t, rendu_position, rendu_taille)
 
         if mp.client.selection:
             self.pion_curseur = mp.client.selection
@@ -785,7 +995,7 @@ class SceneDamier(Scene):
                 for c in mp.client.damier.trouver_cases_possibles(*mp.client.selection)
                 if len(mp.client.damier.deplacer_pion(self.pion_curseur, c, False)) > 0
             ]
-            self.overlay.set_cases(self.__cases_possibles)
+            self.overlay.set_cases(self.__cases_possibles, self.__cases_deplacements)
 
         damier_curseur = (
             (self.curseur[0] - rendu_position[0])
@@ -795,6 +1005,11 @@ class SceneDamier(Scene):
             * self.damier.largeur
             // rendu_taille[1],
         )
+        if inverser:
+            damier_curseur = (
+                self.damier.longueur - damier_curseur[0] - 1,
+                self.damier.largeur - damier_curseur[1] - 1,
+            )
 
         selection_est_pion = (
             bool(mp.client.damier)
@@ -808,6 +1023,9 @@ class SceneDamier(Scene):
             and self.appui
             and damier_curseur in self.__cases_possibles
         ):
+            self.__cases_possibles, self.__cases_deplacements = [], []
+            self.overlay.set_cases(self.__cases_possibles, self.__cases_deplacements)
+
             mp.client.envoyer(
                 mp.client.paquet_deplacer(self.pion_curseur, damier_curseur)
             )
@@ -828,39 +1046,52 @@ class SceneDamier(Scene):
                     self.__cases_possibles = mp.client.damier.trouver_cases_possibles(
                         *pion.position
                     )
-                    self.overlay.set_cases(self.__cases_possibles)
+                    self.overlay.set_cases(
+                        self.__cases_possibles, self.__cases_deplacements
+                    )
 
                 pion.rendre(t, rendu_position, rendu_taille, selection)
 
         GL.glUseProgram(0)
 
-        rendu_taille = (125 * echelle, (80 if mp.client.tour else 35) * echelle)
+        rendu_taille = (125 * echelle, (50 + (45 if mp.client.tour else 0)) * echelle)
         imgui.set_next_window_size(*rendu_taille)
         imgui.set_next_window_position(
             self.longueur - rendu_taille[0], self.largeur - rendu_taille[1]
         )
 
         titre = "À votre tour" if mp.client.tour else "##statut"
-        flags = imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_RESIZE | imgui.WINDOW_NO_COLLAPSE
+        flags = (
+            imgui.WINDOW_NO_MOVE
+            | imgui.WINDOW_NO_RESIZE
+            | imgui.WINDOW_NO_COLLAPSE
+            | imgui.WINDOW_NO_SCROLLBAR
+        )
         if not mp.client.tour:
             flags |= imgui.WINDOW_NO_TITLE_BAR
         imgui.begin(titre, flags=flags)
 
+        texte = mp.client.pseudo
+        taille_texte = imgui.calc_text_size(texte)
+        imgui.set_cursor_pos_x((rendu_taille[0] - taille_texte[0]) / 2)
+
+        imgui.text(texte)
+
         if mp.client.tour:
             texte = "Annuler"
             taille_texte = imgui.calc_text_size(texte)
-
             imgui.set_cursor_pos_x((rendu_taille[0] - taille_texte[0]) / 2 - 2)
 
             if imgui.button(texte):
                 mp.client.tour = False
                 self.__cases_possibles = []
-                self.overlay.set_cases(self.__cases_possibles)
+                self.overlay.set_cases(
+                    self.__cases_possibles, self.__cases_deplacements
+                )
                 mp.client.envoyer(mp.client.paquet_annuler())
 
         texte = "Déconnecter"
         taille_texte = imgui.calc_text_size(texte)
-
         imgui.set_cursor_pos_x((rendu_taille[0] - taille_texte[0]) / 2 - 2)
 
         if imgui.button(texte):
@@ -868,6 +1099,12 @@ class SceneDamier(Scene):
             self.prochaine_scene = SceneTitre()
 
         imgui.end()
+
+        self.tchat.rendre(
+            self.curseur,
+            self.clic,
+            (0, self.largeur - self.tchat.largeur * echelle),
+        )
 
     def fini(self):
         self.damier.fini()

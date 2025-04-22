@@ -3,10 +3,12 @@
 #include "lib.glsl"
 
 uniform float t;
+uniform float t_pre;
 uniform vec2 fenetre_taille;
 uniform vec2 fenetre_position;
 uniform vec2 damier_taille;
 uniform vec2 pion_position;
+uniform vec2 pion_position_pre;
 uniform int pion_couleur;
 uniform bool pion_selection;
 uniform bool pion_dame;
@@ -15,7 +17,8 @@ out vec4 frag_couleur;
 
 void main() {
     vec2 uv = (gl_FragCoord.xy - fenetre_position) / fenetre_taille;
-    uv = vec2(uv.x, 1.0 - uv.y) * damier_taille - 0.5 - pion_position;
+    vec2 _pion_position = pion_position_transition(t, t_pre, pion_position, pion_position_pre);
+    uv = vec2(uv.x, 1.0 - uv.y) * damier_taille - 0.5 - _pion_position;
 
     float d = sqrt(dot(uv, uv));
     float c = 1.0 - clamp(d, 0.0, 1.0);
@@ -46,7 +49,7 @@ void main() {
 
     if (pion_dame) {
         for (float i = 0.0; i < 3.0; i++) {
-            vec2 n = rand2(pion_position);
+            vec2 n = rand2(_pion_position);
             vec2 p = vec2(sin(t + i + (n.x + uv.x) * M_PI) + bruit(uv - t / 3.0) * i, cos(t - n.y * M_PI) + bruit(uv + t) * i);
 
             float d = distance_ligne(uv, -p, p);

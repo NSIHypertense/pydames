@@ -1,7 +1,6 @@
 import sys
 import argparse
 
-import gui
 import mp.client
 import mp.serveur
 import util
@@ -29,7 +28,7 @@ if __name__ == "__main__":
 
     if args.serveur:
         if not util.configuration:
-            print("Erreur: la configuration du serveur n'a pas été trouvée !")
+            print("Erreur : la configuration du serveur n'a pas été trouvée !")
             quit()
 
         print("Lancement du serveur...")
@@ -37,15 +36,15 @@ if __name__ == "__main__":
             util.configuration.socket["adresse"], util.configuration.socket["port"]
         )
         mp.serveur.Console().cmdloop()
+    else:
+        import gui
 
-        quit()
+        gui.init()
+        ecran = gui.Ecran(800, 800)
 
-    gui.init()
-    ecran = gui.Ecran(800, 800)
+        while ecran.poll():
+            ecran.rendre()
 
-    while ecran.poll():
-        ecran.rendre()
-
-    ecran.fini()
-    mp.client.arreter()
-    gui.fini()
+        ecran.fini()
+        mp.client.arreter()
+        gui.fini()

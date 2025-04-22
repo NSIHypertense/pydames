@@ -1,6 +1,7 @@
 import random
 import socket
 import sys
+import time
 import threading
 
 from ormsgpack import MsgpackDecodeError
@@ -31,6 +32,13 @@ tour = False
 deplacements = []
 sauts = []
 selection = None
+messages = []
+
+
+class Message:
+    def __init__(self, pseudo: str, texte: str):
+        self.pseudo, self.texte = pseudo, texte
+        self.t = time.time()
 
 
 def paquet_handshake() -> Paquet:
@@ -51,6 +59,10 @@ def paquet_deplacer(source: tuple[int, int], cible: tuple[int, int]) -> Paquet:
 
 def paquet_annuler() -> Paquet:
     return Paquet([PaquetClientType.ANNULER])
+
+
+def paquet_tchat(message: str) -> Paquet:
+    return Paquet([PaquetClientType.TCHAT, message])
 
 
 def erreur(*args, **kwargs):
@@ -80,6 +92,7 @@ def thread_client():
     global deplacements
     global sauts
     global selection
+    global messages
 
     while sock:
         parties = []
@@ -162,6 +175,9 @@ def thread_client():
                 case PaquetServeurType.TOUR.value:
                     tour = True
                     selection = paquet.x[1]
+                case PaquetServeurType.TCHAT.value:
+                    pseudo, message = paquet.x[1], paquet.x[2]
+                    messages.append(Message(pseudo, message))
                 case _:
                     erreur("paquet de type inconnu")
                     return
@@ -196,6 +212,7 @@ def demarrer(destination: str, port: int):
 def arreter():
     global attente
     global pret
+    global messages
 
     global connexion_erreur
     global connexion_succes
@@ -205,6 +222,7 @@ def arreter():
     with lock:
         pret = False
         attente = True
+        messages = []
 
         connexion_erreur = False
         connexion_succes = False
