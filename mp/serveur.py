@@ -353,7 +353,6 @@ class Gestionnaire(socketserver.BaseRequestHandler):
 
                             if n_client == 0:
                                 self.envoyer(_paquet_tour())
-                            self.envoyer(_paquet_couleur(_couleur_client(n_client)))
                             self.envoyer(_paquet_salon(salon.code))
                         case PaquetClientType.PRET.value:
                             if salon.partie.debut and not salon.partie.fin:
@@ -374,6 +373,9 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                                     if tous_prets:
                                         salon.affecter_sockets()
                                         noir, blanc = salon.sock_noir, salon.sock_blanc
+
+                                        _envoyer(noir, _paquet_couleur(Pion.NOIR))
+                                        _envoyer(blanc, _paquet_couleur(Pion.BLANC))
 
                                         salon.partie.demarrer(
                                             _clients[noir].pseudo,
@@ -582,10 +584,6 @@ def _diffuser(salon: Salon, paquet: Paquet):
     for client in salon.clients:
         donnees = _clients[client]
         donnees.file_paquets.append(octets)
-
-
-def _couleur_client(n: int) -> Pion:
-    return Pion(1 + n % 2)
 
 
 def _demarrer_bdd():

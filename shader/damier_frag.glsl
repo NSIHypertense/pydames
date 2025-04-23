@@ -16,9 +16,8 @@ void main() {
 
     if (couleur.w == 0 && couleur.xyz != vec3(0, 0, 0)) {
         vec2 d = uv * damier_taille * 2;
-        float y = couleur.y * abs(cos(t / couleur.y + (d.x + d.y) * couleur.y)) / 2.0;
-        float z = couleur.z * abs(sin(t * 4) * sin(t * 4 + d.x + d.y));
-        frag_couleur = vec4(couleur.x, y / (couleur.z + 1.0), z, 1.0);
+        vec4 x = couleur * abs(cos(t * 2.0 / couleur + (d.x + d.y) * couleur)) / 2.0;
+        frag_couleur = vec4(x.xyz, 1.0);
     } else {
         vec2 d = uv * damier_taille;
         float a = vignette(uv, 20.0, 0.75);
@@ -28,7 +27,8 @@ void main() {
 
         d.y = damier_taille.y - d.y;
         if (damier_curseur == floor(d)) {
-            v = mix(v, vec3(sin((t + d.x + d.y) * 4.0) / 4.0 + 0.25), 0.4);
+            d = (d - damier_curseur) * rotate2d(t * 2.0);
+            v = clamp(v + vec3(sin((t + d.x + d.y) * 4.0) / 16.0 - (luminance(v) / 3.0 - 0.1)), 0.0, 1.0);
         }
         frag_couleur = vec4(v, couleur.w);
     }

@@ -24,6 +24,22 @@ if __name__ == "__main__":
         help="Héberger un serveur",
     )
 
+    parseur.add_argument(
+        "-p",
+        "--portable",
+        action="store_true",
+        default=False,
+        help="Ne pas sauvegarder les réglages du jeu",
+    )
+
+    parseur.add_argument(
+        "-P",
+        "--pseudo-aleatoire",
+        action="store_true",
+        default=False,
+        help="Utilise toujours un pseudonyme aléatoire",
+    )
+
     args = parseur.parse_args()
 
     if args.serveur:
@@ -39,6 +55,10 @@ if __name__ == "__main__":
     else:
         import gui
 
+        if args.pseudo_aleatoire:
+            mp.client.reglages.pseudo_force = True
+            mp.client.reglages.pseudo = util.Reglages.pseudo_aleatoire()
+
         gui.init()
         ecran = gui.Ecran(800, 800)
 
@@ -48,3 +68,6 @@ if __name__ == "__main__":
         ecran.fini()
         mp.client.arreter()
         gui.fini()
+
+        if not args.portable:
+            util.sauvegarder_reglages(mp.client.reglages)

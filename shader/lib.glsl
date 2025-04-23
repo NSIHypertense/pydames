@@ -1,5 +1,4 @@
 #define M_PI 3.1415926535897932384626433832795
-#define TRANSITION_COEF 2.0
 
 // ombre autour de l'écran
 float vignette(vec2 v, float i, float m) {
@@ -52,6 +51,11 @@ float bruit(vec2 v) {
             dot(rand2(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x), u.y);
 }
 
+// source : https://en.wikipedia.org/wiki/Relative_luminance
+float luminance(vec3 rgb) {
+    return 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
+}
+
 // source : https://thebookofshaders.com/08/
 mat2 rotate2d(float _angle) {
     return mat2(
@@ -59,12 +63,12 @@ mat2 rotate2d(float _angle) {
         sin(_angle), cos(_angle));
 }
 
-float transition(float t) {
+float animation(float t) {
     float x = -2.0 * log(2.0) * (t / (2.0 * log(t / 2.0)));
     return x * x;
 }
 
-vec2 pion_position_transition(float t, float t_pre, vec2 pion_position, vec2 pion_position_pre) {
-    float a = transition(max((t_pre - t) * TRANSITION_COEF, 0.0));
+vec2 pion_position_animation(float t, float t_pre, float duree, vec2 pion_position, vec2 pion_position_pre) {
+    float a = animation(max((t_pre - t) * (1.0 / duree), 0.0));
     return mix(pion_position, pion_position_pre, a);
 }

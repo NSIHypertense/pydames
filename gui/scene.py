@@ -12,8 +12,6 @@ from logic.damier import Pion
 import mp.client
 import util
 
-_TRANSITION_COEF = 2.0
-
 
 def verifier_shader(shader):
     success = GL.glGetShaderiv(shader, GL.GL_COMPILE_STATUS)
@@ -261,25 +259,94 @@ class SceneTitre(Scene):
                     self.popup_commencer = False
                     imgui.close_current_popup()
 
+        taille_popup = (int(longueur_fenetre / 1.15), largeur_fenetre // 2)
+        position_popup = (
+            (longueur_fenetre - taille_popup[0]) / 2,
+            (largeur_fenetre - taille_popup[1]) / 2,
+        )
+
         imgui.set_next_window_size(*taille_popup)
         imgui.set_next_window_position(*position_popup)
 
         with imgui.begin_popup_modal(
-            "Réglages", flags=imgui.WINDOW_NO_MOVE | imgui.WINDOW_NO_RESIZE
+            "Réglages",
+            flags=imgui.WINDOW_NO_MOVE
+            | imgui.WINDOW_NO_RESIZE
+            | imgui.WINDOW_ALWAYS_HORIZONTAL_SCROLLBAR,
         ) as popup:
             if popup.opened:
-                _, pseudo = imgui.input_text("Pseudonyme", mp.client.pseudo)
+                imgui.internal.push_item_flag(
+                    imgui.internal.ITEM_DISABLED, mp.client.reglages.pseudo_force
+                )
+                imgui.push_style_var(
+                    imgui.STYLE_ALPHA,
+                    imgui.get_style().alpha
+                    * (1 - int(mp.client.reglages.pseudo_force) / 2),
+                )
+
+                _, pseudo = imgui.input_text("Pseudonyme", mp.client.reglages.pseudo)
                 if 3 <= len(pseudo) <= 24:
-                    mp.client.pseudo = pseudo
+                    mp.client.reglages.pseudo = pseudo
                 else:
                     imgui.text("Le pseudonyme doit comporter entre 3 et 24 caractères.")
 
+                imgui.pop_style_var()
+                imgui.internal.pop_item_flag()
+
                 _, damier_taille = imgui.input_int(
-                    "Taille du damier", mp.client.damier_taille, step=1
+                    "Taille du damier", mp.client.reglages.taille_damier, step=1
                 )
 
                 if 4 <= damier_taille <= 32:
-                    mp.client.damier_taille = damier_taille
+                    mp.client.reglages.taille_damier = damier_taille
+
+                _, mp.client.reglages.duree_animation = imgui.input_float(
+                    "Durée des animations des pions",
+                    mp.client.reglages.duree_animation,
+                    step=0.5,
+                    step_fast=0.1,
+                )
+
+                imgui.text("Couleurs")
+
+                _, mp.client.reglages.couleurs["noir"] = imgui.color_edit3(
+                    "Pions noirs", *mp.client.reglages.couleurs["noir"]
+                )
+                _, mp.client.reglages.couleurs["blanc"] = imgui.color_edit3(
+                    "Pions blancs", *mp.client.reglages.couleurs["blanc"]
+                )
+                _, mp.client.reglages.couleurs["dame_noir"] = imgui.color_edit3(
+                    "Dames noires",
+                    *mp.client.reglages.couleurs["dame_noir"],
+                )
+                _, mp.client.reglages.couleurs["dame_blanc"] = imgui.color_edit3(
+                    "Dames blanches",
+                    *mp.client.reglages.couleurs["dame_blanc"],
+                )
+                _, mp.client.reglages.couleurs["damier_noir"] = imgui.color_edit3(
+                    "Cases noires du damier",
+                    *mp.client.reglages.couleurs["damier_noir"],
+                )
+                _, mp.client.reglages.couleurs["damier_blanc"] = imgui.color_edit3(
+                    "Cases blanches du damier",
+                    *mp.client.reglages.couleurs["damier_blanc"],
+                )
+                _, mp.client.reglages.couleurs["bordure"] = imgui.color_edit3(
+                    "Bordure du pion sur la souris",
+                    *mp.client.reglages.couleurs["bordure"],
+                )
+                _, mp.client.reglages.couleurs["cases_possibles"] = imgui.color_edit3(
+                    "Déplacements proposés",
+                    *mp.client.reglages.couleurs["cases_possibles"],
+                )
+                _, mp.client.reglages.couleurs["cases_deplacements"] = (
+                    imgui.color_edit3(
+                        "Déplacements de l'adversaire",
+                        *mp.client.reglages.couleurs["cases_deplacements"],
+                    )
+                )
+
+                imgui.dummy(1, 10)
 
                 if imgui.button("Retour"):
                     self.popup_reglages = False
@@ -402,7 +469,7 @@ class SceneAttente(Scene):
         imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 10)
 
         if mp.client.serveur:
-            texte_connexion = f"Connecté en tant que '{mp.client.pseudo}' à {mp.client.serveur[0]}:{mp.client.serveur[1]}"
+            texte_connexion = f"Connecté en tant que '{mp.client.reglages.pseudo}' à {mp.client.serveur[0]}:{mp.client.serveur[1]}"
             imgui.set_cursor_pos_x(
                 (longueur_popup - imgui.calc_text_size(texte_connexion)[0]) / 2
             )
@@ -547,10 +614,17 @@ class SceneDamier(Scene):
             couleurs = []
             m = (2 / self.longueur, 2 / self.largeur)
 
+            couleur_damier_noir = mp.client.reglages.couleurs["damier_noir"]
+            couleur_damier_blanc = mp.client.reglages.couleurs["damier_blanc"]
+            couleur_cases_possibles = mp.client.reglages.couleurs["cases_possibles"]
+            couleur_cases_deplacements = mp.client.reglages.couleurs[
+                "cases_deplacements"
+            ]
+
             for y in range(self.largeur):
                 for x in range(self.longueur):
-                    cond_p, valeur_d = (
-                        (x, y) in cases_possibles,
+                    valeur_p, valeur_d = (
+                        int((x, y) in cases_possibles),
                         cases_deplacements.index((x, y))
                         if (x, y) in cases_deplacements
                         else -1,
@@ -558,10 +632,13 @@ class SceneDamier(Scene):
 
                     if valeur_d != -1:
                         valeur_d = (
-                            1 if valeur_d in (0, len(cases_deplacements) - 1) else 0.5
+                            1.0 if valeur_d in (0, len(cases_deplacements) - 1) else 0.5
                         )
 
-                    if not self.damier_overlay or cond_p or valeur_d > 0:
+                    if valeur_p > 0:
+                        valeur_d *= 0.25
+
+                    if not self.damier_overlay or valeur_p > 0 or valeur_d > 0:
                         x0 = x * m[0] - 1
                         y0 = (self.largeur - 1 - y) * m[1] - 1
                         x1 = x0 + m[0]
@@ -574,12 +651,17 @@ class SceneDamier(Scene):
                         sommets.extend(_sommets)
 
                         if self.damier_overlay:
-                            couleur = [0, valeur_d, int(cond_p), 0]
+                            couleur = [
+                                valeur_p * couleur_cases_possibles[i]
+                                + valeur_d * couleur_cases_deplacements[i]
+                                for i in range(3)
+                            ]
+                            couleur.append(0.0)
                         else:
                             couleur = (
-                                [1 - 1 / 12, 1 - 1 / 12, 1 - 1 / 16, 1]
+                                [*couleur_damier_blanc, 1.0]
                                 if (x + y) % 2 == 0
-                                else [1 / 24, 1 / 24, 1 / 20, 1]
+                                else [*couleur_damier_noir, 1.0]
                             )
 
                         couleurs.extend(couleur * 6)
@@ -705,6 +787,48 @@ class SceneDamier(Scene):
             self.uniform_pion_dame = GL.glGetUniformLocation(
                 self.programme, "pion_dame"
             )
+            self.uniform_duree_animation = GL.glGetUniformLocation(
+                self.programme, "duree_animation"
+            )
+            self.uniform_couleur_noir = GL.glGetUniformLocation(
+                self.programme, "couleur_noir"
+            )
+            self.uniform_couleur_blanc = GL.glGetUniformLocation(
+                self.programme, "couleur_blanc"
+            )
+            self.uniform_couleur_dame_noir = GL.glGetUniformLocation(
+                self.programme, "couleur_dame_noir"
+            )
+            self.uniform_couleur_dame_blanc = GL.glGetUniformLocation(
+                self.programme, "couleur_dame_blanc"
+            )
+            self.uniform_couleur_bordure = GL.glGetUniformLocation(
+                self.programme, "couleur_bordure"
+            )
+
+            GL.glUseProgram(self.programme)
+            GL.glUniform1f(
+                self.uniform_duree_animation, mp.client.reglages.duree_animation
+            )
+            GL.glUniform3f(
+                self.uniform_couleur_noir, *mp.client.reglages.couleurs["noir"]
+            )
+            GL.glUniform3f(
+                self.uniform_couleur_blanc, *mp.client.reglages.couleurs["blanc"]
+            )
+            GL.glUniform3f(
+                self.uniform_couleur_dame_noir,
+                *mp.client.reglages.couleurs["dame_noir"],
+            )
+            GL.glUniform3f(
+                self.uniform_couleur_dame_blanc,
+                *mp.client.reglages.couleurs["dame_blanc"],
+            )
+            GL.glUniform3f(
+                self.uniform_couleur_bordure,
+                *mp.client.reglages.couleurs["bordure"],
+            )
+            GL.glUseProgram(0)
 
             if not SceneDamier._GLPion.buffer_sommets:
                 SceneDamier._GLPion.creer_buffer_sommets()
@@ -720,7 +844,7 @@ class SceneDamier(Scene):
             if self.position != self.position_pre_test:
                 self.position_pre = self.position_pre_test
                 self.position_pre_test = self.position
-                self.t_pre = t + 1.0 / _TRANSITION_COEF
+                self.t_pre = t + mp.client.reglages.duree_animation
 
             pion_position, pion_position_pre = self.position, self.position_pre
             if self.inverser:
@@ -865,6 +989,63 @@ class SceneDamier(Scene):
 
             imgui.end()
 
+    class _GLStatut:
+        def __init__(self, scene: "SceneDamier"):
+            self.scene = scene
+
+        def rendre(self, longueur, largeur):
+            io = imgui.get_io()
+            echelle = io.font_global_scale
+
+            rendu_taille = (
+                125 * echelle,
+                (50 + (45 if mp.client.tour else 0)) * echelle,
+            )
+            imgui.set_next_window_size(*rendu_taille)
+            imgui.set_next_window_position(
+                longueur - rendu_taille[0], largeur - rendu_taille[1]
+            )
+
+            titre = "À votre tour" if mp.client.tour else "##statut"
+            flags = (
+                imgui.WINDOW_NO_MOVE
+                | imgui.WINDOW_NO_RESIZE
+                | imgui.WINDOW_NO_COLLAPSE
+                | imgui.WINDOW_NO_SCROLLBAR
+            )
+            if not mp.client.tour:
+                flags |= imgui.WINDOW_NO_TITLE_BAR
+            imgui.begin(titre, flags=flags)
+
+            texte = mp.client.reglages.pseudo
+            taille_texte = imgui.calc_text_size(texte)
+            imgui.set_cursor_pos_x((rendu_taille[0] - taille_texte[0]) / 2)
+
+            imgui.text(texte)
+
+            if mp.client.tour:
+                texte = "Annuler"
+                taille_texte = imgui.calc_text_size(texte)
+                imgui.set_cursor_pos_x((rendu_taille[0] - taille_texte[0]) / 2 - 2)
+
+                if imgui.button(texte):
+                    mp.client.tour = False
+                    self.scene.__cases_possibles = []
+                    self.scene.overlay.set_cases(
+                        self.__cases_possibles, self.__cases_deplacements
+                    )
+                    mp.client.envoyer(mp.client.paquet_annuler())
+
+            texte = "Déconnecter"
+            taille_texte = imgui.calc_text_size(texte)
+            imgui.set_cursor_pos_x((rendu_taille[0] - taille_texte[0]) / 2 - 2)
+
+            if imgui.button(texte):
+                mp.client.arreter()
+                self.scene.prochaine_scene = SceneTitre()
+
+            imgui.end()
+
     prochaine_scene = None
     longueur = None
     largeur = None
@@ -879,6 +1060,7 @@ class SceneDamier(Scene):
         self.overlay = SceneDamier._GLDamier(8, 8, True, False)
         self.pions = []
         self.tchat = SceneDamier._GLTchat()
+        self.statut = SceneDamier._GLStatut(self)
         self.clic_avant = False
         self.appui = False
         self.pion_curseur = None
@@ -1067,51 +1249,7 @@ class SceneDamier(Scene):
 
         GL.glUseProgram(0)
 
-        rendu_taille = (125 * echelle, (50 + (45 if mp.client.tour else 0)) * echelle)
-        imgui.set_next_window_size(*rendu_taille)
-        imgui.set_next_window_position(
-            self.longueur - rendu_taille[0], self.largeur - rendu_taille[1]
-        )
-
-        titre = "À votre tour" if mp.client.tour else "##statut"
-        flags = (
-            imgui.WINDOW_NO_MOVE
-            | imgui.WINDOW_NO_RESIZE
-            | imgui.WINDOW_NO_COLLAPSE
-            | imgui.WINDOW_NO_SCROLLBAR
-        )
-        if not mp.client.tour:
-            flags |= imgui.WINDOW_NO_TITLE_BAR
-        imgui.begin(titre, flags=flags)
-
-        texte = mp.client.pseudo
-        taille_texte = imgui.calc_text_size(texte)
-        imgui.set_cursor_pos_x((rendu_taille[0] - taille_texte[0]) / 2)
-
-        imgui.text(texte)
-
-        if mp.client.tour:
-            texte = "Annuler"
-            taille_texte = imgui.calc_text_size(texte)
-            imgui.set_cursor_pos_x((rendu_taille[0] - taille_texte[0]) / 2 - 2)
-
-            if imgui.button(texte):
-                mp.client.tour = False
-                self.__cases_possibles = []
-                self.overlay.set_cases(
-                    self.__cases_possibles, self.__cases_deplacements
-                )
-                mp.client.envoyer(mp.client.paquet_annuler())
-
-        texte = "Déconnecter"
-        taille_texte = imgui.calc_text_size(texte)
-        imgui.set_cursor_pos_x((rendu_taille[0] - taille_texte[0]) / 2 - 2)
-
-        if imgui.button(texte):
-            mp.client.arreter()
-            self.prochaine_scene = SceneTitre()
-
-        imgui.end()
+        self.statut.rendre(self.longueur, self.largeur)
 
         self.tchat.rendre(
             self.curseur,

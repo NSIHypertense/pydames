@@ -7,7 +7,7 @@ n=${1-2}
 processus=
 while [ "$n" -gt 0 ]
 do
-	python pydames.py &
+	python pydames.py -p -P &
 	processus="$! ${processus}"
 	n=$((n - 1))
 done

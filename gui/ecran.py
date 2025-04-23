@@ -1,9 +1,10 @@
-import glfw
+import colorsys
 import math
+
+import glfw
 from OpenGL import GL
 import imgui
 from imgui.integrations.glfw import GlfwRenderer
-import util
 
 from .scene import SceneTitre, creer_programme_shader
 
@@ -165,9 +166,9 @@ class Ecran:
         style = imgui.get_style()
         for i in _imgui_couleurs:
             c = style.colors[i]
-            hsv = util.Couleur.rgb_to_hsv(*c[:3])
+            hsv = colorsys.rgb_to_hsv(*c[:3])
             hsv = ((hsv[0] + 0.06) % 1.0, hsv[1] * 1.4, hsv[2] * max(hsv[2], 0.25))
-            rgb = util.Couleur.hsv_to_rgb(*hsv)
+            rgb = colorsys.hsv_to_rgb(*hsv)
             rgb = (*rgb[:2], min(rgb[2] + 0.02, 1.0))
             style.colors[i] = (*rgb, c[3])
 

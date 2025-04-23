@@ -1,4 +1,3 @@
-import random
 import socket
 import sys
 import time
@@ -7,12 +6,11 @@ import threading
 from ormsgpack import MsgpackDecodeError
 
 from logic.damier import Pion, Damier
-
+import util
 from . import Paquet, PaquetClientType, PaquetServeurType
 
 # Joueur
-pseudo = f"Joueur{random.randint(0, 999):03}"
-damier_taille = 8
+reglages = util.reglages()
 
 # Connexion
 connexion_succes = False
@@ -42,7 +40,7 @@ class Message:
 
 
 def paquet_handshake() -> Paquet:
-    return Paquet([PaquetClientType.HANDSHAKE, pseudo, damier_taille])
+    return Paquet([PaquetClientType.HANDSHAKE, reglages.pseudo, reglages.taille_damier])
 
 
 def paquet_salon(code: str) -> Paquet:

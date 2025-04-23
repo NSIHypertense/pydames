@@ -1,7 +1,9 @@
 # utilités
 
+import colorsys
 import math
 from pathlib import Path
+import random
 import re
 import tomllib
 
@@ -20,74 +22,24 @@ base = "pydames"          # nom de la base de données à utiliser
 """
 
 
-# source : https://gist.github.com/mathebox/e0805f72e7db3269ec22
-class Couleur:
-    @staticmethod
-    def rgb_to_hsv(r, g, b):
-        r = float(r)
-        g = float(g)
-        b = float(b)
-        high = max(r, g, b)
-        low = min(r, g, b)
-        h, s, v = high, high, high
-
-        d = high - low
-        s = 0 if high == 0 else d / high
-
-        if high == low:
-            h = 0.0
-        else:
-            h = {
-                r: (g - b) / d + (6 if g < b else 0),
-                g: (b - r) / d + 2,
-                b: (r - g) / d + 4,
-            }[high]
-            h /= 6
-
-        return h, s, v
-
-    @staticmethod
-    def hsv_to_rgb(h, s, v):
-        i = math.floor(h * 6)
-        f = h * 6 - i
-        p = v * (1 - s)
-        q = v * (1 - f * s)
-        t = v * (1 - (1 - f) * s)
-
-        r, g, b = [
-            (v, t, p),
-            (q, v, p),
-            (p, v, t),
-            (p, q, v),
-            (t, p, v),
-            (v, p, q),
-        ][int(i % 6)]
-
-        return r, g, b
-
-
 class ConfigurationServeur:
     def __init__(self, conf: dict):
         assert isinstance(conf, dict)
-        assert "auto_redemarrage" in conf
 
-        assert "socket" in conf
-        assert "mysql" in conf
-
-        auto_redemarrage = conf["auto_redemarrage"]
+        auto_redemarrage = conf.get("auto_redemarrage")
         assert isinstance(auto_redemarrage, bool)
 
-        socket = conf["socket"]
+        socket = conf.get("socket")
         assert isinstance(socket, dict)
-        assert "adresse" in socket and isinstance(socket["adresse"], str)
-        assert "port" in socket and isinstance(socket["port"], int)
+        assert isinstance(socket.get("adresse"), str)
+        assert isinstance(socket.get("port"), int)
 
-        mysql = conf["mysql"]
+        mysql = conf.get("mysql")
         assert isinstance(mysql, dict)
-        assert "hote" in mysql and isinstance(mysql["hote"], str)
-        assert "utilisateur" in mysql and isinstance(mysql["utilisateur"], str)
-        assert "mdp" in mysql and isinstance(mysql["mdp"], str)
-        assert "base" in mysql and isinstance(mysql["base"], str)
+        assert isinstance(mysql.get("hote"), str)
+        assert isinstance(mysql.get("utilisateur"), str)
+        assert isinstance(mysql.get("mdp"), str)
+        assert isinstance(mysql.get("base"), str)
 
         self.__auto_redemarrage = auto_redemarrage
 
@@ -105,6 +57,102 @@ class ConfigurationServeur:
     @property
     def mysql(self) -> dict:
         return self.__mysql
+
+
+class Reglages:
+    def __init__(self, reglages: dict):
+        self.pseudo_force = False
+
+        if not reglages:
+            self.pseudo: str = Reglages.pseudo_aleatoire()
+            self.taille_damier: int = 8
+            self.duree_animation: float = 0.3
+            self.couleurs = {
+                "noir": [0.0, 0.0, 0.0],
+                "blanc": [1.0, 1.0, 1.0],
+                "dame_noir": [1.0, 0.4, 0.3],
+                "dame_blanc": [0.4, 0.6, 1.0],
+                "damier_noir": list(colorsys.hsv_to_rgb(0.6, 0.2, 0.05)),
+                "damier_blanc": list(colorsys.hsv_to_rgb(0.6, 0.05, 1.0)),
+                "bordure": [1.0, 0.0, 1.0],
+                "cases_possibles": [0.0, 0.0, 1.0],
+                "cases_deplacements": [0.0, 1.0, 0.0],
+            }
+            return
+
+        assert isinstance(reglages, dict)
+
+        self.pseudo: str = reglages.get("pseudo")
+        assert isinstance(self.pseudo, str)
+
+        self.taille_damier: int = reglages.get("taille_damier")
+        assert isinstance(self.taille_damier, int)
+
+        self.duree_animation: float = reglages.get("duree_animation")
+        assert isinstance(self.duree_animation, (float, int))
+        self.duree_animation = float(self.duree_animation)
+
+        self.couleurs: dict = reglages.get("couleurs")
+        assert isinstance(self.couleurs, dict)
+        assert (
+            isinstance(self.couleurs.get("noir"), list)
+            and len(self.couleurs["noir"]) == 3
+        )
+        assert (
+            isinstance(self.couleurs.get("blanc"), list)
+            and len(self.couleurs["blanc"]) == 3
+        )
+        assert (
+            isinstance(self.couleurs.get("dame_noir"), list)
+            and len(self.couleurs["dame_noir"]) == 3
+        )
+        assert (
+            isinstance(self.couleurs.get("dame_blanc"), list)
+            and len(self.couleurs["dame_blanc"]) == 3
+        )
+        assert (
+            isinstance(self.couleurs.get("damier_noir"), list)
+            and len(self.couleurs["damier_noir"]) == 3
+        )
+        assert (
+            isinstance(self.couleurs.get("damier_blanc"), list)
+            and len(self.couleurs["damier_blanc"]) == 3
+        )
+        assert (
+            isinstance(self.couleurs.get("bordure"), list)
+            and len(self.couleurs["bordure"]) == 3
+        )
+        assert (
+            isinstance(self.couleurs.get("cases_possibles"), list)
+            and len(self.couleurs["cases_possibles"]) == 3
+        )
+        assert (
+            isinstance(self.couleurs.get("cases_deplacements"), list)
+            and len(self.couleurs["cases_deplacements"]) == 3
+        )
+
+    @staticmethod
+    def pseudo_aleatoire() -> str:
+        return f"Joueur{random.randint(0, 999):03}"
+
+
+def reglages_str(reglages: Reglages) -> str:
+    return f"""# réglages du jeu
+pseudo = \"{reglages.pseudo}\"
+taille_damier = {reglages.taille_damier}
+duree_animation = {reglages.duree_animation}
+
+[couleurs]
+noir = [ {", ".join([str(f) for f in reglages.couleurs["noir"]])} ]
+blanc = [ {", ".join([str(f) for f in reglages.couleurs["blanc"]])} ]
+dame_noir = [ {", ".join([str(f) for f in reglages.couleurs["dame_noir"]])} ]
+dame_blanc = [ {", ".join([str(f) for f in reglages.couleurs["dame_blanc"]])} ]
+damier_noir = [ {", ".join([str(f) for f in reglages.couleurs["damier_noir"]])} ]
+damier_blanc = [ {", ".join([str(f) for f in reglages.couleurs["damier_blanc"]])} ]
+bordure = [ {", ".join([str(f) for f in reglages.couleurs["bordure"]])} ]
+cases_possibles = [ {", ".join([str(f) for f in reglages.couleurs["cases_possibles"]])} ]
+cases_deplacements = [ {", ".join([str(f) for f in reglages.couleurs["cases_deplacements"]])} ]
+"""
 
 
 _root_pydames = Path(__file__).resolve().parent
@@ -146,15 +194,38 @@ def traiter_glsl(emplacement: Path) -> str:
     return source
 
 
-_fichier_conf = _root_pydames / "serveur.toml"
-configuration = None
+def configuration_serveur() -> ConfigurationServeur | None:
+    fichier_conf = _root_pydames / "serveur.toml"
 
-if _fichier_conf.exists():
-    with open(_fichier_conf, "rb") as f:
-        configuration = ConfigurationServeur(tomllib.load(f))
-else:
-    with open(_fichier_conf, "w", encoding="utf-8") as f:
-        f.write(conf_defaut)
-        print(
-            f"Configuration par défaut écrite dans '{_fichier_conf}'. Veuillez la mettre à jour."
-        )
+    if fichier_conf.exists():
+        with open(fichier_conf, "rb") as f:
+            return ConfigurationServeur(tomllib.load(f))
+    else:
+        with open(fichier_conf, "w", encoding="utf-8") as f:
+            f.write(conf_defaut)
+            print(
+                f"Configuration par défaut écrite dans '{fichier_conf}'. Veuillez la mettre à jour."
+            )
+
+
+configuration = configuration_serveur()
+
+
+def reglages() -> Reglages:
+    fichier_reglages = _root_pydames / "reglages.toml"
+
+    if fichier_reglages.exists():
+        with open(fichier_reglages, "rb") as f:
+            return Reglages(tomllib.load(f))
+    else:
+        with open(fichier_reglages, "w", encoding="utf-8") as f:
+            r = Reglages(None)
+            f.write(reglages_str(r))
+            return r
+
+
+def sauvegarder_reglages(reglages: Reglages):
+    fichier_reglages = _root_pydames / "reglages.toml"
+
+    with open(fichier_reglages, "w", encoding="utf-8") as f:
+        f.write(reglages_str(reglages))
