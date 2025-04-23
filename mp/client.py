@@ -13,6 +13,9 @@ from . import Paquet, PaquetClientType, PaquetServeurType
 reglages = util.reglages()
 
 # Connexion
+destination = "127.0.0.1"
+port = "2332"
+
 connexion_succes = False
 connexion_erreur = False
 serveur = None

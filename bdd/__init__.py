@@ -5,7 +5,7 @@ import util
 
 
 class Base:
-    def __init__(self, hote: str, utilisateur: str, mdp: str, base: str):
+    def __init__(self, hote: str, utilisateur: str, mdp: str, base: str, ssl: bool):
         self.__connexion = None
 
         try:
@@ -13,7 +13,11 @@ class Base:
                 f"Connexion à la base de données en cours... ('{utilisateur}'@'{hote}' : {base})"
             )
             self.__connexion = mysql.connector.connect(
-                host=hote, user=utilisateur, password=mdp, database=base
+                host=hote,
+                user=utilisateur,
+                password=mdp,
+                database=base,
+                ssl_disabled=not ssl,
             )
             self.__curseur = self.__connexion.cursor()
 

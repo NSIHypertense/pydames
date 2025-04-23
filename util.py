@@ -19,6 +19,7 @@ hote = "localhost"        # adresse IP ou nom de domaine du serveur MySQL
 utilisateur = "pydames"
 mdp = "pydames"           # mot de passe
 base = "pydames"          # nom de la base de données à utiliser
+ssl = true                # connexion SSL/TLS
 """
 
 
@@ -40,6 +41,7 @@ class ConfigurationServeur:
         assert isinstance(mysql.get("utilisateur"), str)
         assert isinstance(mysql.get("mdp"), str)
         assert isinstance(mysql.get("base"), str)
+        assert isinstance(mysql.get("ssl"), bool)
 
         self.__auto_redemarrage = auto_redemarrage
 

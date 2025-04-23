@@ -595,6 +595,7 @@ def _demarrer_bdd():
             configuration.mysql["utilisateur"],
             configuration.mysql["mdp"],
             configuration.mysql["base"],
+            configuration.mysql["ssl"],
         )
     except ConnectorError as e:
         print(e)

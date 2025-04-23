@@ -125,8 +125,6 @@ class SceneTitre(Scene):
         self.popup_commencer = False
         self.popup_reglages = False
 
-        self.destination = "127.0.0.1"
-        self.port = "2332"
         self.connexion = False
         self.connexion_erreur = 0
         self.thread_connexion = None
@@ -137,7 +135,7 @@ class SceneTitre(Scene):
         def creer_socket():
             try:
                 mp.client.arreter()
-                mp.client.demarrer(self.destination, int(self.port))
+                mp.client.demarrer(mp.client.destination, int(mp.client.port))
             except OSError:
                 print(traceback.format_exc())
                 self.connexion = False
@@ -216,15 +214,17 @@ class SceneTitre(Scene):
                         imgui.STYLE_ALPHA, imgui.get_style().alpha * 0.5
                     )
 
-                _, self.destination = imgui.input_text(
-                    "Destination", self.destination, -1
+                _, mp.client.destination = imgui.input_text(
+                    "Destination", mp.client.destination, -1
                 )
-                _, self.port = imgui.input_text(
-                    "Port", self.port, -1, imgui.INPUT_TEXT_CHARS_DECIMAL
+                _, mp.client.port = imgui.input_text(
+                    "Port", mp.client.port, -1, imgui.INPUT_TEXT_CHARS_DECIMAL
                 )
 
                 if imgui.button("Connecter"):
-                    print(f"Connexion en cours: {(self.destination, self.port)}")
+                    print(
+                        f"Connexion en cours : {(mp.client.destination, mp.client.port)}"
+                    )
                     self.connexion = True
                     self.__connecter(t)
                 elif self.connexion:
