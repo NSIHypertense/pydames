@@ -5,7 +5,9 @@ import util
 
 
 class Base:
-    def __init__(self, hote: str, utilisateur: str, mdp: str, base: str, ssl: bool):
+    def __init__(
+        self, hote: str, port: int, utilisateur: str, mdp: str, base: str, ssl: bool
+    ):
         self.__connexion = None
 
         try:
@@ -14,6 +16,7 @@ class Base:
             )
             self.__connexion = mysql.connector.connect(
                 host=hote,
+                port=port,
                 user=utilisateur,
                 password=mdp,
                 database=base,

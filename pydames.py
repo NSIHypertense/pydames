@@ -1,9 +1,12 @@
-import sys
 import argparse
+import atexit
+import traceback
 
 import mp.client
 import mp.serveur
 import util
+from util import configuration
+from www import Php
 
 
 def type_port(x):
@@ -40,18 +43,65 @@ if __name__ == "__main__":
         help="Utilise toujours un pseudonyme aléatoire",
     )
 
+    parseur.add_argument(
+        "--php",
+        action="store_true",
+        default=False,
+        help="Héberge seulement le serveur PHP",
+    )
+
     args = parseur.parse_args()
 
     if args.serveur:
-        if not util.configuration:
+        if not configuration:
             print("Erreur : la configuration du serveur n'a pas été trouvée !")
             quit()
 
-        print("Lancement du serveur...")
-        mp.serveur.demarrer(
-            util.configuration.socket["adresse"], util.configuration.socket["port"]
-        )
-        mp.serveur.Console().cmdloop()
+        processus_php = None
+
+        if configuration.php["actif"] or args.php:
+            print("Lancement du serveur PHP...")
+
+            if fichier_env := configuration.php["env"]:
+                with open(fichier_env, "w") as f:
+                    Php.generer_env(f, configuration)
+
+            try:
+                serveur = configuration.php["serveur"]
+                if serveur:
+                    serveur = util.resource_chemin(serveur)
+                php = Php.trouver(serveur)
+
+                if not php and serveur and configuration.php["telecharger"]:
+                    serveur.mkdir(exist_ok=True)
+                    php = Php.telecharger(serveur)
+                if not php:
+                    raise RuntimeError("aucun exécutable PHP n'a été trouvé")
+
+                site = util.resource_chemin(configuration.php["site"])
+                processus_php = Php.lancer(
+                    php,
+                    util.resource_chemin(configuration.php["config"]),
+                    site,
+                    configuration.php["adresse"],
+                    configuration.php["port"],
+                )
+                assert processus_php
+
+                atexit.register(lambda: Php.arreter(processus_php))
+            except Exception:
+                print("Le serveur PHP n'a pas pu être démarré.")
+                print(traceback.format_exc())
+
+        if not args.php:
+            print("Lancement du serveur pydames...")
+            mp.serveur.demarrer(
+                configuration.socket["adresse"], configuration.socket["port"]
+            )
+            mp.serveur.Console().cmdloop()
+
+        if processus_php:
+            Php.attendre(processus_php)
     else:
         import gui
 

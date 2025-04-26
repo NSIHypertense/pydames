@@ -1,7 +1,6 @@
 # utilités
 
 import colorsys
-import math
 from pathlib import Path
 import random
 import re
@@ -14,12 +13,24 @@ auto_redemarrage = true   # redémarre le serveur automatiquement lors d'une err
 adresse = "0.0.0.0"       # affecter à "127.0.0.1" pour servir seulement sur la machine locale
 port = 2332
 
-[mysql]
+[mysql]  # se connecter à une base de données MySQL
+actif = true
 hote = "localhost"        # adresse IP ou nom de domaine du serveur MySQL
+port = 3306               # port du serveur MySQL
 utilisateur = "pydames"
 mdp = "pydames"           # mot de passe
 base = "pydames"          # nom de la base de données à utiliser
 ssl = true                # connexion SSL/TLS
+
+[php]    # héberger un site web PHP local
+actif = true
+adresse = "localhost"
+port = 8080
+telecharger = true        # automatiquement télécharger un serveur PHP s'il n'est pas présent
+serveur = "www/php"       # destination de téléchargement du serveur PHP
+config = "www/php"        # configuration PHP (fichier php.ini ou un dossier qui le contient)
+site = "www/root"         # emplacement du répertoire du site web
+env = "www/root/.env.php" # environnement/configuration du site web
 """
 
 
@@ -37,16 +48,30 @@ class ConfigurationServeur:
 
         mysql = conf.get("mysql")
         assert isinstance(mysql, dict)
+        assert isinstance(mysql.get("actif"), bool)
         assert isinstance(mysql.get("hote"), str)
+        assert isinstance(mysql.get("port"), int)
         assert isinstance(mysql.get("utilisateur"), str)
         assert isinstance(mysql.get("mdp"), str)
         assert isinstance(mysql.get("base"), str)
         assert isinstance(mysql.get("ssl"), bool)
 
+        php = conf.get("php")
+        assert isinstance(php, dict)
+        assert isinstance(php.get("actif"), bool)
+        assert isinstance(php.get("adresse"), str)
+        assert isinstance(php.get("port"), int)
+        assert isinstance(php.get("telecharger"), bool)
+        assert php.get("serveur")
+        assert isinstance(php.get("config"), str)
+        assert isinstance(php.get("site"), str)
+        assert isinstance(php.get("env"), str)
+
         self.__auto_redemarrage = auto_redemarrage
 
         self.__socket = socket
         self.__mysql = mysql
+        self.__php = php
 
     @property
     def auto_redemarrage(self) -> bool:
@@ -59,6 +84,10 @@ class ConfigurationServeur:
     @property
     def mysql(self) -> dict:
         return self.__mysql
+
+    @property
+    def php(self) -> dict:
+        return self.__php
 
 
 class Reglages:

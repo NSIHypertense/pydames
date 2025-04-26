@@ -162,6 +162,9 @@ cython_debug/
 #.idea/
 
 .vscode/
+www/php/**/*
+!www/php/php.ini
+www/root/.env.php
 serveur.toml
 reglages.toml
 

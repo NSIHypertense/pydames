@@ -592,6 +592,7 @@ def _demarrer_bdd():
     try:
         _base = bdd.Base(
             configuration.mysql["hote"],
+            configuration.mysql["port"],
             configuration.mysql["utilisateur"],
             configuration.mysql["mdp"],
             configuration.mysql["base"],
@@ -613,7 +614,8 @@ def demarrer(destination: str, port: int):
     with _lock:
         socketserver.ThreadingTCPServer.allow_reuse_address = True
 
-        _demarrer_bdd()
+        if configuration.mysql["actif"]:
+            _demarrer_bdd()
 
         _serv = socketserver.ThreadingTCPServer((destination, port), Gestionnaire)
 
@@ -632,12 +634,13 @@ def arreter(e: Exception | None = None):
         try:
             raise e
         except ConnectorError:
-            if configuration.auto_redemarrage:
-                if _base:
-                    _base.arreter()
-                print("\nRedémarrage de la BDD...\n")
-                _demarrer_bdd()
-                return
+            if configuration.mysql["actif"]:
+                if configuration.auto_redemarrage:
+                    if _base:
+                        _base.arreter()
+                    print("\nRedémarrage de la BDD...\n")
+                    _demarrer_bdd()
+                    return
         except Exception:
             pass
 
