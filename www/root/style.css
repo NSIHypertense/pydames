@@ -5,11 +5,29 @@
 html, body {
 	margin: 0;
 	padding: 2rem;
+	height: 100%;
 	color: var(--noir);
 }
 
-main {
-	padding-top: 1rem;
+button:not(.brand) > .logo, .button:not(.brand) > .logo {
+	position: relative;
+	width: 20px;
+	height: 20px;
+	bottom: -3px;
+	margin: 0;
+}
+
+section.flex > div.flex {
+	padding: .6em;
+}
+
+ul.liste-compacte {
+	margin-block: 0 0;
+	padding-inline: 30px 0;
+}
+
+.liste-compacte li {
+	margin: 0;
 }
 
 .statut {
@@ -19,5 +37,20 @@ main {
 	padding: 0;
 	margin: 0 1em 0.3em 1em;
 	border: 1px solid var(--noir);
-	border-radius: 100%;
+	border-radius: 0.7em;
+}
+
+.parties-jouees {
+	width: 100%;
+}
+
+.parties-jouees th, .parties-jouees td {
+	text-align: center;
+	padding: 0 0.5em 0 0.5em;
+}
+
+.flux img {
+	width: 100%;
+	height: 100%;
+	aspect-ratio: 1;
 }

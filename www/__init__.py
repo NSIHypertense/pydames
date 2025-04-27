@@ -84,6 +84,10 @@ return [
     'socket' => [
         'port' => {configuration.socket["port"]}
     ],
+    'flux' => [
+        'actif' => {str(configuration.flux["actif"]).lower()},
+        'port' => {configuration.flux["port"]}
+    ],
     'mysql' => [
         'hote' => '{configuration.mysql["hote"]}',
         'port' => {configuration.mysql["port"]},

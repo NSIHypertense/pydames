@@ -1,11 +1,14 @@
 import argparse
 import atexit
+from pathlib import Path
+import shutil
 import traceback
 
 import mp.client
 import mp.serveur
 import util
 from util import configuration
+import www.flux as flux
 from www import Php
 
 
@@ -62,8 +65,22 @@ if __name__ == "__main__":
         if configuration.php["actif"] or args.php:
             print("Lancement du serveur PHP...")
 
-            if fichier_env := configuration.php["env"]:
-                with open(fichier_env, "w") as f:
+            if data := configuration.php["data"]:
+                data = Path(data)
+
+                if data.is_absolute():
+                    print(
+                        "ATTENTION : Le dossier data donné est un emplacement absolu, donc par securité il ne sera pas supprimé."
+                    )
+                    data = data.resolve()
+                else:
+                    data = data.resolve()
+                    if data.is_dir():
+                        shutil.rmtree(data)
+
+                data.mkdir(exist_ok=True)
+
+                with open(data / ".env.php", "w") as f:
                     Php.generer_env(f, configuration)
 
             try:
@@ -93,6 +110,14 @@ if __name__ == "__main__":
                 print("Le serveur PHP n'a pas pu être démarré.")
                 print(traceback.format_exc())
 
+        if configuration.flux["actif"]:
+            print("Lancement du serveur de flux...")
+            flux.demarrer(
+                configuration.flux["adresse"],
+                configuration.flux["port"],
+                configuration.socket["port"],
+            )
+
         if not args.php:
             print("Lancement du serveur pydames...")
             mp.serveur.demarrer(
@@ -100,6 +125,9 @@ if __name__ == "__main__":
             )
             mp.serveur.Console().cmdloop()
 
+        if configuration.flux["actif"]:
+            print("arrêt du serveur de flux...")
+            flux.arreter()
         if processus_php:
             Php.attendre(processus_php)
     else:

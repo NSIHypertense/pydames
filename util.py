@@ -13,6 +13,11 @@ auto_redemarrage = true   # redémarre le serveur automatiquement lors d'une err
 adresse = "0.0.0.0"       # affecter à "127.0.0.1" pour servir seulement sur la machine locale
 port = 2332
 
+[flux]   # serveur WebSocket qui sert de flux sur le site web
+actif = true
+adresse = "127.0.0.1"
+port = 2333
+
 [mysql]  # se connecter à une base de données MySQL
 actif = true
 hote = "localhost"        # adresse IP ou nom de domaine du serveur MySQL
@@ -30,7 +35,7 @@ telecharger = true        # automatiquement télécharger un serveur PHP s'il n'
 serveur = "www/php"       # destination de téléchargement du serveur PHP
 config = "www/php"        # configuration PHP (fichier php.ini ou un dossier qui le contient)
 site = "www/root"         # emplacement du répertoire du site web
-env = "www/root/.env.php" # environnement/configuration du site web
+data = "www/root/data"    # dossier des données temporaires du site
 """
 
 
@@ -45,6 +50,12 @@ class ConfigurationServeur:
         assert isinstance(socket, dict)
         assert isinstance(socket.get("adresse"), str)
         assert isinstance(socket.get("port"), int)
+
+        flux = conf.get("flux")
+        assert isinstance(flux, dict)
+        assert isinstance(flux.get("actif"), bool)
+        assert isinstance(flux.get("adresse"), str)
+        assert isinstance(flux.get("port"), int)
 
         mysql = conf.get("mysql")
         assert isinstance(mysql, dict)
@@ -65,11 +76,12 @@ class ConfigurationServeur:
         assert php.get("serveur")
         assert isinstance(php.get("config"), str)
         assert isinstance(php.get("site"), str)
-        assert isinstance(php.get("env"), str)
+        assert isinstance(php.get("data"), str)
 
         self.__auto_redemarrage = auto_redemarrage
 
         self.__socket = socket
+        self.__flux = flux
         self.__mysql = mysql
         self.__php = php
 
@@ -80,6 +92,10 @@ class ConfigurationServeur:
     @property
     def socket(self) -> dict:
         return self.__socket
+
+    @property
+    def flux(self) -> dict:
+        return self.__flux
 
     @property
     def mysql(self) -> dict:
@@ -98,6 +114,7 @@ class Reglages:
             self.pseudo: str = Reglages.pseudo_aleatoire()
             self.taille_damier: int = 8
             self.duree_animation: float = 0.3
+            self.captures: bool = True
             self.couleurs = {
                 "noir": [0.0, 0.0, 0.0],
                 "blanc": [1.0, 1.0, 1.0],
@@ -122,6 +139,9 @@ class Reglages:
         self.duree_animation: float = reglages.get("duree_animation")
         assert isinstance(self.duree_animation, (float, int))
         self.duree_animation = float(self.duree_animation)
+
+        self.captures: bool = reglages.get("captures")
+        assert isinstance(self.captures, bool)
 
         self.couleurs: dict = reglages.get("couleurs")
         assert isinstance(self.couleurs, dict)
@@ -172,6 +192,7 @@ def reglages_str(reglages: Reglages) -> str:
 pseudo = \"{reglages.pseudo}\"
 taille_damier = {reglages.taille_damier}
 duree_animation = {reglages.duree_animation}
+captures = {str(reglages.captures).lower()}
 
 [couleurs]
 noir = [ {", ".join([str(f) for f in reglages.couleurs["noir"]])} ]

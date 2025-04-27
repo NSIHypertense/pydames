@@ -12,6 +12,7 @@ class PaquetClientType(Enum):
     DEPLACER = 4
     ANNULER = 5
     TCHAT = 6
+    CAPTURE = 7
 
 
 class PaquetServeurType(Enum):

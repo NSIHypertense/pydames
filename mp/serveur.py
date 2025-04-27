@@ -1,11 +1,13 @@
 import cmd
 import datetime
+import json
 import random
 import select
 import socketserver
 import sys
 import threading
 import traceback
+import urllib.request
 
 from ormsgpack import MsgpackDecodeError
 from mysql.connector import Error as ConnectorError
@@ -17,9 +19,13 @@ import bdd
 
 _serv = None
 _thread = None
+_thread_captures = None
+_event_captures = None
+_file_captures = []
 _lock = threading.Lock()
 
 _base = None
+_url_php = None
 _clients = {}
 
 _salons = []
@@ -46,7 +52,6 @@ class Statistiques:
         self.__pions_restants -= sauts
 
     def dame(self):
-        self.__score += 2
         self.__dames += 1
 
 
@@ -210,6 +215,14 @@ class DonneesClient:
             [],
         )
 
+    def __eq__(self, autre):
+        return (self.etat_pret, self.pseudo, self.taille_damier, self.file_paquets) == (
+            autre.etat_pret,
+            autre.pseudo,
+            autre.taille_damier,
+            autre.file_paquets,
+        )
+
 
 class Gestionnaire(socketserver.BaseRequestHandler):
     def setup(self):
@@ -218,8 +231,6 @@ class Gestionnaire(socketserver.BaseRequestHandler):
         _clients[self.request] = DonneesClient()
 
     def erreur(self, *args, **kwargs):
-        global _clients
-
         print(f"({self.client_address[0]}) erreur :", *args, file=sys.stderr, **kwargs)
         self.envoyer(_paquet_erreur(" ".join(map(str, args))))
 
@@ -228,9 +239,10 @@ class Gestionnaire(socketserver.BaseRequestHandler):
 
     def handle(self):
         global _clients
+        global _file_captures
 
         salon = None
-        n_client = None
+        flux_id = None
 
         try:
             self.envoyer(_paquet_handshake())
@@ -239,6 +251,20 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                 r, w, _ = select.select([self.request], [self.request], [])
 
                 if w:  # ecrire
+                    if flux_id:
+                        capture = next(
+                            (c for c in _file_captures if c[1] == flux_id), None
+                        )
+                        if capture:
+                            _file_captures.remove(capture)
+                            octets = capture[0]
+                            octets = octets + b"FLUX_EOF"
+
+                            try:
+                                self.request.sendall(octets)
+                            except ConnectionError:
+                                break
+
                     file = _clients[self.request].file_paquets
                     if file:
                         octets = file.pop(0)
@@ -249,10 +275,15 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                     continue
 
                 parties = []
-                octets = self.request.recv(4)
+                try:
+                    octets = self.request.recv(4)
+                except ConnectionError:
+                    self.erreur("la connexion a été fermée")
+                    break
 
                 if not octets:
-                    self.erreur("la connexion a été fermée")
+                    if _clients[self.request] != DonneesClient():
+                        self.erreur("la connexion a été fermée")
                     break
 
                 if len(octets) < 4:
@@ -263,7 +294,7 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                     octets[:4], byteorder="little", signed=False
                 )
 
-                while True:
+                while self.request:
                     total = sum([len(x) for x in parties])
                     if total >= taille_paquet:
                         break
@@ -271,6 +302,10 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                     parties.append(self.request.recv(taille_paquet - total))
 
                 octets = b"".join(parties)
+
+                if octets[:4] == b"flux":
+                    flux_id = octets[4:].decode("utf-8")
+                    continue
 
                 try:
                     paquet = Paquet.deserialiser(octets)
@@ -336,23 +371,27 @@ class Gestionnaire(socketserver.BaseRequestHandler):
 
                             if not code or not (
                                 salon := next(
-                                    (j for j in _salons if j.code == code), None
+                                    (s for s in _salons if s.code == code), None
                                 )
                             ):
                                 salon = Salon(
                                     code, _clients[self.request].taille_damier
                                 )
                                 _salons.append(salon)
+                                _envoyer_creer_salon(salon)
 
                             if len(salon.clients) >= 2:
                                 self.erreur("salon déjà rempli")
                                 break
 
                             salon.clients.append(self.request)
-                            n_client = len(salon.clients) - 1
+                            _envoyer_ajouter_joueur(
+                                salon, _clients[self.request].pseudo
+                            )
 
-                            if n_client == 0:
+                            if len(salon.clients) - 1 == 0:
                                 self.envoyer(_paquet_tour())
+
                             self.envoyer(_paquet_salon(salon.code))
                         case PaquetClientType.PRET.value:
                             if salon.partie.debut and not salon.partie.fin:
@@ -491,6 +530,15 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                                 )
 
                             _diffuser(salon, _paquet_tchat(pseudo, message))
+                        case PaquetClientType.CAPTURE.value:
+                            if configuration.php["actif"]:
+                                image = paquet.x[1]
+                                _file_captures.append(
+                                    (
+                                        image,
+                                        f"{salon.code}/{_clients[self.request].pseudo}",
+                                    )
+                                )
                         case _:
                             self.erreur(f"paquet de type inconnu ({paquet.type()})")
                             break
@@ -510,15 +558,21 @@ class Gestionnaire(socketserver.BaseRequestHandler):
                 salon = next((s for s in _salons if self.request in s.clients), None)
 
                 if salon:
+                    _envoyer_enlever_joueur(salon, _clients[self.request].pseudo)
                     salon.partie.arreter()
                     salon.clients.remove(self.request)
 
                 _clients.pop(self.request, None)
+
                 for donnees in _clients.values():
                     donnees.etat_pret = False
 
                 if salon:
-                    _diffuser(salon, _paquet_attente())
+                    if salon.clients:
+                        _diffuser(salon, _paquet_attente())
+                    else:
+                        _envoyer_supprimer_salon(salon)
+                        _salons.remove(salon)
         except Exception as e:
             print(traceback.format_exc())
             arreter(e)
@@ -586,6 +640,55 @@ def _diffuser(salon: Salon, paquet: Paquet):
         donnees.file_paquets.append(octets)
 
 
+def _envoyer_salon(salon: Salon, donnees: dict):
+    if not _url_php:
+        return
+
+    try:
+        req = urllib.request.Request(
+            _url_php + "salons.php",
+            data=json.dumps(donnees).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req) as res:
+            if res.status != 200:
+                print(
+                    f"[PHP salons] réponse HTTP {res.status} : '{res.read().decode().trim()}'"
+                )
+    except Exception:
+        print("[PHP salons] erreur :")
+        print(traceback.format_exc())
+
+
+def _envoyer_creer_salon(salon: Salon):
+    donnees = {"action": "creer_salon", "code_salon": salon.code}
+    _envoyer_salon(salon, donnees)
+
+
+def _envoyer_supprimer_salon(salon: Salon):
+    donnees = {"action": "supprimer_salon", "code_salon": salon.code}
+    _envoyer_salon(salon, donnees)
+
+
+def _envoyer_ajouter_joueur(salon: Salon, pseudo: str):
+    donnees = {
+        "action": "ajouter_joueur",
+        "code_salon": salon.code,
+        "nom_joueur": pseudo,
+    }
+    _envoyer_salon(salon, donnees)
+
+
+def _envoyer_enlever_joueur(salon: Salon, pseudo: str):
+    donnees = {
+        "action": "enlever_joueur",
+        "code_salon": salon.code,
+        "nom_joueur": pseudo,
+    }
+    _envoyer_salon(salon, donnees)
+
+
 def _demarrer_bdd():
     global _base
 
@@ -606,6 +709,8 @@ def _demarrer_bdd():
 def demarrer(destination: str, port: int):
     global _serv
     global _thread
+    global _file_captures
+    global _url_php
 
     def servir():
         _serv.serve_forever()
@@ -617,6 +722,12 @@ def demarrer(destination: str, port: int):
         if configuration.mysql["actif"]:
             _demarrer_bdd()
 
+        if configuration.php["actif"]:
+            _url_php = (
+                f"http://{configuration.php['adresse']}:{configuration.php['port']}/"
+            )
+            _file_captures = []
+
         _serv = socketserver.ThreadingTCPServer((destination, port), Gestionnaire)
 
         _thread = threading.Thread(target=servir)
@@ -627,6 +738,7 @@ def arreter(e: Exception | None = None):
     global _base
     global _serv
     global _thread
+    global _file_captures
     global _clients
     global _salons
 
@@ -653,8 +765,8 @@ def arreter(e: Exception | None = None):
             _serv.server_close()
             _serv = None
 
-        if _thread:
-            _thread = None
+        _thread = None
+        _file_captures = None
 
         if _base:
             _base.arreter()

@@ -66,6 +66,10 @@ def paquet_tchat(message: str) -> Paquet:
     return Paquet([PaquetClientType.TCHAT, message])
 
 
+def paquet_capture(capture) -> Paquet:
+    return Paquet([PaquetClientType.CAPTURE, bytes(capture)])
+
+
 def erreur(*args, **kwargs):
     print("erreur multijoueur :", *args, file=sys.stderr, **kwargs)
     arreter()
@@ -109,7 +113,7 @@ def thread_client():
 
         taille_paquet = int.from_bytes(octets[:4], byteorder="little", signed=False)
 
-        while True:
+        while sock:
             total = sum([len(x) for x in parties])
             if total >= taille_paquet:
                 break

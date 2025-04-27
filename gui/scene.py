@@ -1,12 +1,14 @@
 from abc import ABC, abstractmethod
+import io
 import math
 import time
 import threading
 import traceback
 
+import imgui
 import numpy as np
 from OpenGL import GL
-import imgui
+from PIL import Image
 
 from logic.damier import Pion
 import mp.client
@@ -52,6 +54,22 @@ def creer_programme_shader(vert: str, frag: str):
     GL.glDeleteShader(fragment_shader)
 
     return programme
+
+
+def capture_ecran() -> list:
+    viewport = GL.glGetIntegerv(GL.GL_VIEWPORT)
+    x, y, longueur, largeur = viewport
+
+    pixels = GL.glReadPixels(x, y, longueur, largeur, GL.GL_RGB, GL.GL_UNSIGNED_BYTE)
+    pixels = np.frombuffer(pixels, dtype=np.uint8).reshape((largeur, longueur, 3))
+    pixels = np.flip(pixels, axis=0)
+
+    image = Image.fromarray(pixels, mode="RGB")
+    image.resize((800, 800), Image.Resampling.NEAREST)
+    stream = io.BytesIO()
+    image.save(stream, format="jpeg", quality=75)
+
+    return list(stream.getbuffer())
 
 
 class Scene(ABC):
@@ -305,6 +323,11 @@ class SceneTitre(Scene):
                     mp.client.reglages.duree_animation,
                     step=0.5,
                     step_fast=0.1,
+                )
+
+                _, mp.client.reglages.captures = imgui.checkbox(
+                    "Captures d'écran envoyées au serveur en temps réel",
+                    mp.client.reglages.captures,
                 )
 
                 imgui.text("Couleurs")
@@ -1064,6 +1087,7 @@ class SceneDamier(Scene):
         self.clic_avant = False
         self.appui = False
         self.pion_curseur = None
+        self.dernier_t = 0
 
     def __trouver_cases_deplacements(
         self, a: tuple[int, int], b: tuple[int, int]
@@ -1248,6 +1272,11 @@ class SceneDamier(Scene):
                 pion.rendre(t, rendu_position, rendu_taille, selection)
 
         GL.glUseProgram(0)
+
+        if mp.client.reglages.captures and t - self.dernier_t > 1 / 10:
+            self.dernier_t = t
+            capture = capture_ecran()
+            mp.client.envoyer(mp.client.paquet_capture(capture))
 
         self.statut.rendre(self.longueur, self.largeur)
 

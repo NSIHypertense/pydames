@@ -3,5 +3,7 @@ imgui
 mysql-connector-python==8.0.28
 numpy
 ormsgpack
+pillow
 PyOpenGL
+websockets
 
