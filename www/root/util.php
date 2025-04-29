@@ -110,6 +110,8 @@ function query(array $a, array $b): string {
 }
 
 function rechercheSql(mysqli $mysqli, string $sql, array $params, string $types): array {
+	$sql = str_replace("\t", "", trim($sql));
+	$sql = str_replace("\r", "", $sql);
 	$req = $mysqli->prepare($sql);
 
 	if (!$req)
@@ -165,68 +167,70 @@ function rechercheJoueurs(mysqli $mysqli, int|null $id_joueur = null): array {
 
 	$sql = "
 	SELECT 
-		classement.id,
-		classement.rang,
-		classement.nom,
-		classement.parties_jouees,
-		classement.parties_gagnees,
-		classement.parties_perdues,
-		classement.score_total,
-		classement.dames_total,
-		classement.premiere_partie,
-		classement.derniere_partie
-	FROM (
-		SELECT 
-			joueurs.id,
-			DENSE_RANK() OVER (
-				ORDER BY
-					COALESCE(SUM(statistiques.score), 0) DESC,
-					COALESCE($sql_parties_gagnees, 0) DESC,
-					COALESCE($sql_parties_perdues, 0) ASC,
-					COALESCE(SUM(statistiques.dames), 0) DESC,
-					COALESCE(SUM(statistiques.pions_restants), 0) DESC,
-					MD5(joueurs.nom) DESC
-			) AS rang,
-			joueurs.nom,
-			COUNT(DISTINCT parties.id) AS parties_jouees,
-			$sql_parties_gagnees AS parties_gagnees,
-			$sql_parties_perdues AS parties_perdues,
-			COALESCE(SUM(statistiques.score), 0) AS score_total,
-			COALESCE(SUM(statistiques.dames), 0) AS dames_total,
-			COALESCE(SUM(statistiques.pions_restants), 0) AS pions_restants_total,
-			MIN(parties.debut) AS premiere_partie,
-			MAX(parties.debut) AS derniere_partie
-		FROM joueurs
-		LEFT JOIN equipes ON equipes.id_joueur = joueurs.id
-		LEFT JOIN parties ON parties.id_noir = equipes.id OR parties.id_blanc = equipes.id
-		LEFT JOIN statistiques ON statistiques.id = equipes.id_statistiques
-		LEFT JOIN statistiques AS adversaire ON adversaire.id = 
-			CASE 
-				WHEN parties.id_noir = equipes.id THEN parties.id_blanc
-				WHEN parties.id_blanc = equipes.id THEN parties.id_noir
-			END
-		GROUP BY joueurs.id
-	) AS classement
+		joueurs.id,
+		1 AS rang,
+		joueurs.nom,
+		COUNT(DISTINCT parties.id) AS parties_jouees,
+		$sql_parties_gagnees AS parties_gagnees,
+		$sql_parties_perdues AS parties_perdues,
+		COALESCE(SUM(statistiques.score), 0) AS score_total,
+		COALESCE(SUM(statistiques.dames), 0) AS dames_total,
+		COALESCE(SUM(statistiques.pions_restants), 0) AS pions_restants_total,
+		MIN(parties.debut) AS premiere_partie,
+		MAX(parties.debut) AS derniere_partie
+	FROM joueurs
+	LEFT JOIN equipes ON equipes.id_joueur = joueurs.id
+	LEFT JOIN parties ON parties.id_noir = equipes.id OR parties.id_blanc = equipes.id
+	LEFT JOIN statistiques ON statistiques.id = equipes.id_statistiques
+	LEFT JOIN statistiques AS adversaire ON adversaire.id = 
+		CASE 
+			WHEN parties.id_noir = equipes.id THEN parties.id_blanc
+			WHEN parties.id_blanc = equipes.id THEN parties.id_noir
+		END
+	GROUP BY joueurs.id
 	";
 
-	$where = 'WHERE';
-	if ($recherche !== '') {
-		$sql .= "$where classement.nom LIKE ? ";
-		$params[] = "%$recherche%";
-		$types .= 's';
-		$where = 'AND';
-	}
-	if ($id_joueur !== null) {
-		$sql .= "$where classement.id = ? ";
-		$params[] = $id_joueur;
-		$types .= 'i';
-	}
+	$sql .= "
+    ORDER BY score_total DESC, parties_gagnees DESC, parties_perdues ASC, dames_total DESC, pions_restants_total DESC, MD5(joueurs.nom) DESC
+    ";
+	$resultat = rechercheSql($mysqli, $sql, $params, $types);
 
-	$sql .= '
-	ORDER BY rang
-	';
+	$classement = [];
+    $rang_pre = 0;
+    $valeurs_pre = null;
 
-	return rechercheSql($mysqli, $sql, $params, $types);
+    foreach ($resultat as $i => $l) {
+        $valeurs = [
+            "score_total" => $l["score_total"],
+            "parties_gagnees" => $l["parties_gagnees"],
+            "parties_perdues" => $l["parties_perdues"],
+            "dames_total" => $l["dames_total"],
+            "pions_restants_total" => $l["pions_restants_total"],
+            "nom" => $l["nom"]
+        ];
+
+        if ($valeurs_pre && $valeurs === $valeurs_pre) {
+            $l["rang"] = $rang_pre;
+        } else {
+            $rang_pre = $i + 1;
+            $l["rang"] = $rang_pre;
+        }
+
+		$ajouter = true;
+        if ($recherche !== '' && strpos(strtolower($l["nom"]), strtolower($recherche)) === false) {
+            $ajouter = false;
+        }
+        if ($id_joueur !== null && $l['id'] != $id_joueur) {
+            $ajouter = false;
+        }
+
+        $valeurs_pre = $valeurs;
+		if ($ajouter) {
+			$classement[] = $l;
+		}
+    }
+
+    return $classement;
 }
 
 function htmlRechercheJoueurs(array $joueurs) {

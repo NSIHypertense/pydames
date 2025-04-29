@@ -103,33 +103,34 @@ if __name__ == "__main__":
                     configuration.php["adresse"],
                     configuration.php["port"],
                 )
-                assert processus_php
+                if not processus_php:
+                    raise RuntimeError("aucun exécutable PHP n'a été trouvé")
 
                 atexit.register(lambda: Php.arreter(processus_php))
             except Exception:
                 print("Le serveur PHP n'a pas pu être démarré.")
                 print(traceback.format_exc())
 
-        if configuration.flux["actif"]:
-            print("Lancement du serveur de flux...")
-            flux.demarrer(
-                configuration.flux["adresse"],
-                configuration.flux["port"],
-                configuration.socket["port"],
-            )
-
         if not args.php:
+            if configuration.flux["actif"]:
+                print("Lancement du serveur de flux...")
+                flux.demarrer(
+                    configuration.flux["adresse"],
+                    configuration.flux["port"],
+                    configuration.socket["port"],
+                )
+
             print("Lancement du serveur pydames...")
             mp.serveur.demarrer(
                 configuration.socket["adresse"], configuration.socket["port"]
             )
             mp.serveur.Console().cmdloop()
 
-        if configuration.flux["actif"]:
-            print("arrêt du serveur de flux...")
-            flux.arreter()
-        if processus_php:
-            Php.attendre(processus_php)
+            if configuration.flux["actif"]:
+                print("arrêt du serveur de flux...")
+                flux.arreter()
+            if processus_php:
+                Php.attendre(processus_php)
     else:
         import gui
 

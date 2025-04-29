@@ -3,14 +3,19 @@
 import http.client
 import os
 from pathlib import Path
+from queue import Queue, Empty
 import shutil
 import stat
 import subprocess
 from tempfile import NamedTemporaryFile
 import time
+from threading import Thread
 import traceback
 import urllib.request
 from zipfile import ZipFile
+
+_file = None
+_thread = None
 
 
 class Php:
@@ -107,6 +112,17 @@ return [
         adresse: str,
         port: int,
     ) -> subprocess.Popen | None:
+        global _file
+        global _thread
+        
+        def mettre_file_stdout(file, stdout):
+            try:
+                for line in iter(stdout.readline, b''):
+                    file.put(line)
+            except AttributeError:
+                pass
+            stdout.close()
+            
         if not executable_php.is_file():
             print(
                 f"[PHP] l'exécutable php n'est pas installé à l'emplacement donné : '{executable_php}'"
@@ -137,27 +153,33 @@ return [
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
+        _file = Queue()
+        _thread = Thread(target=mettre_file_stdout, args=(_file, proc.stdout), daemon=True)
+        _thread.start()
+        
         print(f"[PHP] arguments : {proc.args}")
 
-        e = None
-        for i in range(10):
-            try:
-                conn = http.client.HTTPConnection(adresse, port, timeout=1)
-                conn.request("GET", "/")
-                res = conn.getresponse()
-                if res.status == 200:
-                    print(f"[PHP] serveur lancé sur http://{adresse}:{port}")
-                    return proc
-            except Exception as _e:
-                e = _e
-            time.sleep(0.5)
-
-        if e:
-            try:
-                raise e
-            except Exception:
-                print("[PHP] erreur")
-                print(traceback.format_exc())
+        conn = None
+        
+        Php.print_stdout(proc)
+        try:
+            if conn:
+                conn.close()
+                
+            conn = http.client.HTTPConnection("localhost", port, timeout=15)
+            conn.request("GET", "/")
+            res = conn.getresponse()
+            
+            if res.status == 200:
+                print(f"[PHP] serveur lancé sur http://localhost:{port}")
+                conn.close()
+                return proc
+        except Exception:
+            print("[PHP] erreur")
+            print(traceback.format_exc())
+        
+        if conn:
+            conn.close()
 
         print("[PHP] le serveur n'a pas répondu à temps.")
         proc.terminate()
@@ -167,8 +189,20 @@ return [
     @staticmethod
     def attendre(processus: subprocess.Popen):
         while processus and not processus.poll():
-            for ligne in processus.stdout:
-                print(f"[PHP] {ligne.decode('utf-8')}", end="")
+            Php.print_stdout(processus)
+    
+    @staticmethod
+    def print_stdout(processus: subprocess.Popen):
+        try:
+            while True:
+                ligne = _file.get_nowait()
+                try:
+                    l = ligne.decode('utf-8')
+                except UnicodeDecodeError:
+                    l = ligne
+                print(f"[PHP] {l}", end="")
+        except Empty:
+            pass
 
     @staticmethod
     def arreter(processus: subprocess.Popen):
@@ -179,3 +213,7 @@ return [
                 processus.wait(timeout=5)
             except Exception:
                 processus.kill()
+                
+        _file = None
+        _thread.join(timeout=1)
+        _thread = None
