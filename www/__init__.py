@@ -160,23 +160,29 @@ return [
         print(f"[PHP] arguments : {proc.args}")
 
         conn = None
+        i = 5
         
-        Php.print_stdout(proc)
-        try:
-            if conn:
-                conn.close()
+        while i > 0:
+            Php.print_stdout(proc)
+            try:
+                if conn:
+                    conn.close()
+                    
+                conn = http.client.HTTPConnection("localhost", port, timeout=15)
+                conn.request("GET", "/")
+                res = conn.getresponse()
                 
-            conn = http.client.HTTPConnection("localhost", port, timeout=15)
-            conn.request("GET", "/")
-            res = conn.getresponse()
-            
-            if res.status == 200:
-                print(f"[PHP] serveur lancé sur http://localhost:{port}")
-                conn.close()
-                return proc
-        except Exception:
-            print("[PHP] erreur")
-            print(traceback.format_exc())
+                if res.status == 200:
+                    print(f"[PHP] serveur lancé sur http://localhost:{port}")
+                    conn.close()
+                    return proc
+            except Exception:
+                if i == 0:
+                    print("[PHP] erreur")
+                    print(traceback.format_exc())
+                else:
+                    i -= 1
+            time.sleep(0.5)
         
         if conn:
             conn.close()
@@ -206,6 +212,8 @@ return [
 
     @staticmethod
     def arreter(processus: subprocess.Popen):
+        global _thread
+
         if processus or not processus.poll():
             print("[PHP] arrêt du serveur...")
             try:
@@ -215,5 +223,6 @@ return [
                 processus.kill()
                 
         _file = None
-        _thread.join(timeout=1)
-        _thread = None
+        if _thread:
+            _thread.join(timeout=1)
+            _thread = None

@@ -129,8 +129,9 @@ if __name__ == "__main__":
             if configuration.flux["actif"]:
                 print("arrêt du serveur de flux...")
                 flux.arreter()
-            if processus_php:
-                Php.attendre(processus_php)
+
+        if processus_php:
+            Php.attendre(processus_php)
     else:
         import gui
 
